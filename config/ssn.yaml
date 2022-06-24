@@ -1,0 +1,43 @@
+runs: 3
+seed: 42
+datamodule:
+  filename: /home/rjo21/Desktop/SuperSweetNet/data/filtered_data.tsv
+  exp_name: ssn
+  batch_size: 64
+  num_workers: 0
+trainer:
+  gpus: 1
+  max_epochs: 1000
+  profiler: null
+  gradient_clip_val: 100
+early_stop:
+  patience: 40
+model:
+  monitor: val_loss
+  arch: graph
+  gnn:
+    feat_dim: 6
+    output_dim: 256
+    node:
+      module: ginconv
+      hidden_dim: 32
+      num_layers: 3
+    pool:
+      module: gmt
+      num_heads: 4
+      hidden_dim: 32
+      ratio: 0.25
+  mlp:
+    dropout: 0.2
+    hidden_dim: 512
+    output_dim: 151
+    num_layers: 2
+  optimizer:
+    module: adam
+    lr: 0.001
+    weight_decay: 0.01
+    momentum: 0.01
+    reduce_lr:
+      factor: 0.1
+      patience: 20
+      monitor: val_loss
