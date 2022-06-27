@@ -18,18 +18,18 @@ class ClassificationModel(LightningModule):
         self.mlp = MLP(
             input_dim=kwargs["model"]["gnn"]["output_dim"],
             hidden_dim=kwargs["model"]["mlp"]["hidden_dim"],
-            output_dim=kwargs["model"]["mlp"]["output_dim"],
+            output_dim=kwargs["datamodule"]["num_classes"],
             num_layers=kwargs["model"]["mlp"]["num_layers"],
             dropout=kwargs["model"]["mlp"]["dropout"],
         )
-        self._set_class_metrics(kwargs["model"]["mlp"]["output_dim"])
+        self._set_class_metrics(kwargs["datamodule"]["num_classes"])
         self.params = kwargs
 
     def _set_class_metrics(self, num_classes: int = 2):
         metrics = MetricCollection(
             [
                 Accuracy(num_classes=None if num_classes == 2 else num_classes),
-                AUROC(num_classes=None if num_classes == 2 else num_classes),
+                # AUROC(num_classes=None if num_classes == 2 else num_classes),
                 MatthewsCorrCoef(num_classes=num_classes),
             ]
         )
@@ -57,27 +57,27 @@ class ClassificationModel(LightningModule):
         """
         fwd_dict = self.forward(data)
         labels = data.y
-        bce_loss = F.binary_cross_entropy_with_logits(fwd_dict["pred"], labels.float())
-        return dict(loss=bce_loss, preds=fwd_dict["pred"].detach(), labels=labels.detach())
+        ce_loss = F.cross_entropy(fwd_dict["pred"], labels.float().argmax(dim=1))
+        return dict(loss=ce_loss, preds=fwd_dict["pred"].detach(), labels=labels.detach())
 
     def training_step(self, data: Data, data_idx: int) -> dict:
         """What to do during training step."""
         ss = self.shared_step(data)
-        self.train_metrics.update(ss["preds"], ss["labels"])
+        self.train_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
         self.log("train_loss", ss["loss"], batch_size=self.params["datamodule"]["batch_size"])
         return ss
 
     def validation_step(self, data: Data, data_idx: int) -> dict:
         """What to do during validation step. Also logs the values for various callbacks."""
         ss = self.shared_step(data)
-        self.val_metrics.update(ss["preds"], ss["labels"])
+        self.val_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
         self.log("val_loss", ss["loss"], batch_size=self.params["datamodule"]["batch_size"])
         return ss
 
     def test_step(self, data: Data, data_idx: int) -> dict:
         """What to do during test step. Also logs the values for various callbacks."""
         ss = self.shared_step(data)
-        self.test_metrics.update(ss["preds"], ss["labels"])
+        self.test_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
         self.log("test_loss", ss["loss"], batch_size=self.params["datamodule"]["batch_size"])
         return ss
 

@@ -1,5 +1,6 @@
 import os
 import random
+import numpy as np
 
 import pandas as pd
 from glyles import converter
@@ -35,6 +36,15 @@ class suppress_stdout_stderr(object):
             os.close(fd)
 
 
+def get_dummies(data):
+    items = dict((x, i) for i, x in enumerate(sorted(set([x for sublist in data for x in sublist]))))
+    output = np.zeros((len(data), len(items)), dtype=int)
+    for i, entry in enumerate(data):
+        for x in entry:
+            output[i, items[x]] = 1
+    return pd.DataFrame(output, columns=items.keys())
+
+
 def split(data, mode):
     if mode == "random":
         splits = []
@@ -54,20 +64,18 @@ def main(filepath, datapath, split_mode="random"):
     with open(filepath, "r") as datastream:
         data = {"IUPAC": [], "SMILES": [], "Species": []}
         lines = datastream.readlines()
-        for i, line in enumerate(lines):
+        for i, line in enumerate(lines[1:]):
             print(f"\r{i}/{len(lines)}", end="")
-            if i == 0:
-                continue
-            if i == 1000:
-                break
             glycan, species = line.split("\t")[:2]
             if species == "[]":
+                continue
+            species = species.replace("'", "").replace("[", "").replace("]", ", ")[:-2].split(",")
+            if len(species) > 1:
                 continue
             with suppress_stdout_stderr():
                 iupac, smiles = converter.convert(glycan, returning=True)[0]
             if smiles == "":
                 continue
-            species = species.replace("'", "").replace("[", "").replace("]", ", ")[:-2]
             data["IUPAC"].append(iupac)
             data["SMILES"].append(smiles)
             data["Species"].append(species)
@@ -75,7 +83,7 @@ def main(filepath, datapath, split_mode="random"):
         print("\tFinished")
         splits = split(data, split_mode)
         df = pd.DataFrame(list(zip(*(data["IUPAC"], data["SMILES"], splits))), columns=["IUPAC", "SMILES", "Split"])
-        species = pd.get_dummies(data["Species"])
+        species = get_dummies(data["Species"])
         df = df.join(species)
         df.to_csv(datapath, index=False, sep="\t")
 
