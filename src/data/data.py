@@ -40,6 +40,7 @@ class GlycanDataModule(LightningDataModule):
             batch_size: int = 128,
             num_workers: int = 1,
             shuffle: bool = True,
+            transform: Callable = None,
             **kwargs,
     ):
         super().__init__()
@@ -50,9 +51,9 @@ class GlycanDataModule(LightningDataModule):
         self.shuffle = shuffle
 
         """Load the individual datasets"""
-        self.train = GlycanDataset(self.filename, self.exp_name, split="train").shuffle()
-        self.val = GlycanDataset(self.filename, self.exp_name, split="val").shuffle()
-        self.test = GlycanDataset(self.filename, self.exp_name, split="test").shuffle()
+        self.train = GlycanDataset(self.filename, self.exp_name, split="train", transform=transform).shuffle()
+        self.val = GlycanDataset(self.filename, self.exp_name, split="val", transform=transform).shuffle()
+        self.test = GlycanDataset(self.filename, self.exp_name, split="test", transform=transform).shuffle()
 
     def update_config(self, config: dict) -> None:
         raise NotImplementedError
@@ -74,7 +75,7 @@ class GlycanDataModule(LightningDataModule):
             batch_size=self.batch_size,
             shuffle=self.shuffle if shuffle else False,
             num_workers=self.num_workers,
-            follow_batch=["prot_x", "drug_x"],
+            follow_batch=["x"],
         )
 
 
@@ -84,10 +85,11 @@ class GlycanDataset(InMemoryDataset):
             filename: str,
             exp_name: str,
             split: str = "train",
+            transform=None,
     ):
         root = self._set_filenames(filename, exp_name)
         self.splits = {"train": 0, "val": 1, "test": 2}
-        super().__init__(root)
+        super().__init__(root, transform=transform)
         self.data, self.slices = torch.load(self.processed_paths[self.splits[split]])
 
     def _set_filenames(self, filename: str, exp_name: str) -> str:
@@ -106,12 +108,12 @@ class GlycanDataset(InMemoryDataset):
             data_list = {k: [] for k in self.splits.keys()}
             for line in data_input.readlines()[1:]:
                 parts = line.strip().split("\t")
-                iupac, smiles, split = parts[0:3]
-                y = torch.tensor([int(x) for x in parts[3:]])
+                iupac, level, smiles, split = parts[0:4]
+                y = torch.tensor([int(float(x)) for x in parts[4:]])
                 x, edge_index = get_graph(smiles)
                 if x is None and edge_index is None:
                     continue
-                data_list[split].append(Data(x=x, edge_index=edge_index, y=y.unsqueeze(0)))
+                data_list[split].append(Data(x=x, edge_index=edge_index, y=y.unsqueeze(0), iupac=iupac, level=level))
             for split in self.splits.keys():
                 data, slices = self.collate(data_list[split])
                 torch.save((data, slices), self.processed_paths[self.splits[split]])

@@ -49,27 +49,22 @@ class GraphEncoder(LightningModule):
     r"""Encoder for graphs.
 
     Args:
-        return_nodes (bool, optional): Return node embeddings as well. Defaults to False.
+
     """
 
-    def __init__(self, return_nodes: bool = False, **kwargs):
-        super().__init__()
-        self.feat_embed = nn.Linear(kwargs["feat_dim"], kwargs["node"]["hidden_dim"])
-        self.node_embed = GINConvNet(kwargs["node"]["hidden_dim"], kwargs["node"]["num_layers"])
-        self.pool = GMTNet(
-            input_dim=kwargs["node"]["hidden_dim"],
-            hidden_dim=kwargs["pool"]["hidden_dim"],
-            output_dim=kwargs["output_dim"],
-            ratio=kwargs["pool"]["ratio"],
-            num_heads=kwargs["pool"]["num_heads"],
-        )
-        self.return_nodes = return_nodes
-
-    def forward(
+    def __init__(
         self,
-        data: Union[dict, Data],
-        **kwargs,
-    ) -> Union[Tensor, Tuple[Tensor, Tensor]]:
+        node_feat_dim: int,
+        node_embed_dim: int,
+        num_gin_layers: int,
+        graph_embed_dim: int,
+    ):
+        super().__init__()
+        self.feat_embed = MLP(node_feat_dim, 64, node_embed_dim, num_layers=2)
+        self.node_embed = GINConvNet(node_embed_dim, num_gin_layers)
+        self.pool = GMTNet(node_embed_dim, graph_embed_dim)
+
+    def forward(self, data: Union[dict, Data], **kwargs,) -> Tuple[Tensor, Tensor]:
         r"""Encode a graph.
 
         Args:
@@ -78,7 +73,7 @@ class GraphEncoder(LightningModule):
                 - edge_index: Edge indices
                 - batch: Batch indices
         Returns:
-            Union[Tensor, Tuple[Tensor, Tensor]]: Either graph of graph+node embeddings
+            dict: Either graph of graph+node embeddings
         """
         if not isinstance(data, dict):
             data = data.to_dict()
@@ -96,9 +91,7 @@ class GraphEncoder(LightningModule):
             batch=batch,
         )
         embed = self.pool(x=node_embed, edge_index=edge_index, batch=batch)
-        if self.return_nodes:
-            return embed, node_embed
-        return embed
+        return embed, node_embed
 
 
 class GINConvNet(LightningModule):
@@ -107,13 +100,11 @@ class GINConvNet(LightningModule):
     Refer to :class:`torch_geometric.nn.conv.GINConv` for more details.
 
     Args:
-        input_dim (int): Size of the input vector
-        output_dim (int): Size of the output vector
         hidden_dim (int, optional): Size of the hidden vector. Defaults to 32.
         num_layers (int, optional): Total number of layers. Defaults to 3.
     """
 
-    def __init__(self, hidden_dim: int, num_layers: int = 3, **kwargs):
+    def __init__(self, hidden_dim: int, num_layers: int = 3):
         super().__init__()
         self.inp = GINConv(
             nn.Sequential(
@@ -143,45 +134,6 @@ class GINConvNet(LightningModule):
                 nn.BatchNorm1d(hidden_dim),
             )
         )
-
-    def forward(self, x: Tensor, edge_index: Adj, **kwargs) -> Tensor:
-        """"""
-        x = self.inp(x, edge_index)
-        for module in self.mid_layers:
-            x = module(x, edge_index)
-        x = self.out(x, edge_index)
-        return x
-
-
-class GATConvNet(LightningModule):
-    """Graph Attention Layer.
-
-    Refer to :class:`torch_geometric.nn.conv.GATConv` for more details.
-
-    Args:
-        input_dim (int): Size of the input vector
-        output_dim (int): Size of the output vector
-        hidden_dim (int, optional): Size of the hidden vector. Defaults to 32.
-        heads (int, optional): Number of heads for multi-head attention. Defaults to 4.
-        num_layers (int, optional): Number of layers. Defaults to 4.
-    """
-
-    def __init__(
-        self,
-        input_dim,
-        output_dim: int,
-        hidden_dim: int = 32,
-        heads: int = 4,
-        num_layers: int = 4,
-        **kwargs,
-    ):
-        super().__init__()
-        self.inp = GATConv(input_dim, hidden_dim, heads, concat=False)
-        self.mid_layers = ModuleList(
-            [GATConv(hidden_dim, hidden_dim, heads, concat=False) for _ in range(num_layers - 2)]
-        )
-
-        self.out = GATConv(hidden_dim, output_dim, concat=False)
 
     def forward(self, x: Tensor, edge_index: Adj, **kwargs) -> Tensor:
         """"""

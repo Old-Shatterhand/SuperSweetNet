@@ -8,13 +8,15 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, RichMode
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 
-from src.data import GlycanDataModule
-from src.model import ClassificationModel
+from src.data.data import GlycanDataModule
+from src.models.gin.model import GINClassModel
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 models = {
-    "graph": ClassificationModel,
+    "gin": GINClassModel,
+    "cin": None,
+    "sweetnet": None,
 }
 
 
@@ -37,7 +39,7 @@ def train(**kwargs):
 
     folder = os.path.join(
         "tb_logs",
-        f"dti_{kwargs['datamodule']['exp_name']}",
+        f"gly_{kwargs['datamodule']['exp_name']}",
         f"{kwargs['datamodule']['filename'].split('/')[-1].split('.')[0]}",
     )
     if not os.path.exists(folder):
@@ -68,8 +70,7 @@ def single_run(folder, version, **kwargs):
     )
 
     callbacks = [
-        ModelCheckpoint(monitor=kwargs["model"]["monitor"], save_top_k=3, mode="min"),
-        EarlyStopping(monitor=kwargs["model"]["monitor"], mode="min", **kwargs["early_stop"]),
+        ModelCheckpoint(monitor="val_loss", save_top_k=3, save_last=True, mode="min"),
         RichModelSummary(),
         RichProgressBar(),
     ]
@@ -80,7 +81,12 @@ def single_run(folder, version, **kwargs):
         enable_model_summary=False,
         **kwargs["trainer"],
     )
-    model = models[kwargs["model"]["arch"]](**kwargs)
+    model = models[kwargs["model"]["arch"]](
+        num_classes=kwargs["datamodule"]["num_classes"],
+        opt_args=kwargs["optimizer"],
+        batch_size=kwargs["datamodule"]["batch_size"],
+        **kwargs["model"][kwargs["model"]["arch"]]
+    )
 
     print("Model buildup finished")
     trainer.fit(model, datamodule)

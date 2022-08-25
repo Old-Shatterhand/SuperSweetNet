@@ -6,30 +6,22 @@ import torch.nn.functional as F
 from torch.optim import AdamW, Adam, SGD, RMSprop
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch_geometric.data import Data
-from torchmetrics import MetricCollection, Accuracy, AUROC, MatthewsCorrCoef
+from torchmetrics import MetricCollection, Accuracy, MatthewsCorrCoef
 
-from src.modules import MLP, GraphEncoder
+from src.models.gin.modules import MLP, GraphEncoder
 
 
-class ClassificationModel(LightningModule):
-    def __init__(self, **kwargs):
+class BaseModel(LightningModule):
+    def __init__(self, num_classes, batch_size, opt_args):
         super().__init__()
-        self.drug_encoder = GraphEncoder(**kwargs["model"]["gnn"])
-        self.mlp = MLP(
-            input_dim=kwargs["model"]["gnn"]["output_dim"],
-            hidden_dim=kwargs["model"]["mlp"]["hidden_dim"],
-            output_dim=kwargs["datamodule"]["num_classes"],
-            num_layers=kwargs["model"]["mlp"]["num_layers"],
-            dropout=kwargs["model"]["mlp"]["dropout"],
-        )
-        self._set_class_metrics(kwargs["datamodule"]["num_classes"])
-        self.params = kwargs
+        self._set_class_metrics(num_classes)
+        self.batch_size = batch_size
+        self.opt_config = opt_args
 
-    def _set_class_metrics(self, num_classes: int = 2):
+    def _set_class_metrics(self, num_classes: int):
         metrics = MetricCollection(
             [
                 Accuracy(num_classes=None if num_classes == 2 else num_classes),
-                # AUROC(num_classes=None if num_classes == 2 else num_classes),
                 MatthewsCorrCoef(num_classes=num_classes),
             ]
         )
@@ -43,9 +35,10 @@ class ClassificationModel(LightningModule):
         :param drug:
         :return:
         """
-        drug_embed = self.drug_encoder(drug)
+        drug_embed, node_embeds = self.drug_encoder(drug)
         return dict(
             drug_embed=drug_embed,
+            node_embeds=node_embeds,
             pred=self.mlp(drug_embed),
         )
 
@@ -64,21 +57,21 @@ class ClassificationModel(LightningModule):
         """What to do during training step."""
         ss = self.shared_step(data)
         self.train_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
-        self.log("train_loss", ss["loss"], batch_size=self.params["datamodule"]["batch_size"])
+        self.log("train_loss", ss["loss"], batch_size=self.batch_size)
         return ss
 
     def validation_step(self, data: Data, data_idx: int) -> dict:
         """What to do during validation step. Also logs the values for various callbacks."""
         ss = self.shared_step(data)
         self.val_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
-        self.log("val_loss", ss["loss"], batch_size=self.params["datamodule"]["batch_size"])
+        self.log("val_loss", ss["loss"], batch_size=self.batch_size)
         return ss
 
     def test_step(self, data: Data, data_idx: int) -> dict:
         """What to do during test step. Also logs the values for various callbacks."""
         ss = self.shared_step(data)
         self.test_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
-        self.log("test_loss", ss["loss"], batch_size=self.params["datamodule"]["batch_size"])
+        self.log("test_loss", ss["loss"], batch_size=self.batch_size)
         return ss
 
     def log_histograms(self):
@@ -116,24 +109,23 @@ class ClassificationModel(LightningModule):
 
     def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
         """Configure the optimizer and/or lr schedulers"""
-        opt_config = self.params["model"]["optimizer"]
-        opt_class = {"adamw": AdamW, "adam": Adam, "sgd": SGD, "rmsprop": RMSprop}[opt_config["module"]]
+        opt_class = {"adamw": AdamW, "adam": Adam, "sgd": SGD, "rmsprop": RMSprop}[self.opt_config["module"]]
         opt_params = {
             "params": self.parameters(),
-            "lr": opt_config["lr"],
-            "weight_decay": opt_config["weight_decay"],
+            "lr": self.opt_config["lr"],
+            "weight_decay": self.opt_config["weight_decay"],
         }
-        if opt_config["module"] in ["sgd", "rmsprop"]:  # not adam or adamw
-            opt_params["momentum"] = opt_config["momentum"]
+        if self.opt_config["module"] in ["sgd", "rmsprop"]:  # not adam or adamw
+            opt_params["momentum"] = self.opt_config["momentum"]
         optimizer = opt_class(**opt_params)
 
         lr_scheduler = {
-            "monitor": opt_config["reduce_lr"]["monitor"],
+            "monitor": self.opt_config["reduce_lr"]["monitor"],
             "scheduler": ReduceLROnPlateau(
                 optimizer,
                 verbose=True,
-                factor=opt_config["reduce_lr"]["factor"],
-                patience=opt_config["reduce_lr"]["patience"],
+                factor=self.opt_config["reduce_lr"]["factor"],
+                patience=self.opt_config["reduce_lr"]["patience"],
             ),
         }
         return [optimizer], [lr_scheduler]

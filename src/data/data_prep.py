@@ -1,3 +1,4 @@
+import ast
 import os
 import random
 import numpy as np
@@ -48,7 +49,7 @@ def get_dummies(data):
 def split(data, mode):
     if mode == "random":
         splits = []
-        for _ in range(len(data["IUPAC"])):
+        for _ in range(len(data)):
             x = random.random()
             if x < 0.7:
                 splits.append("train")
@@ -60,33 +61,46 @@ def split(data, mode):
     raise ValueError("Unknown splitting technique!")
 
 
-def main(filepath, datapath, split_mode="random"):
-    with open(filepath, "r") as datastream:
-        data = {"IUPAC": [], "SMILES": [], "Species": []}
-        lines = datastream.readlines()
-        for i, line in enumerate(lines[1:]):
-            print(f"\r{i}/{len(lines)}", end="")
-            glycan, species = line.split("\t")[:2]
-            if species == "[]":
-                continue
-            species = species.replace("'", "").replace("[", "").replace("]", ", ")[:-2].split(",")
-            if len(species) > 1:
-                continue
-            with suppress_stdout_stderr():
-                iupac, smiles = converter.convert(glycan, returning=True)[0]
-            if smiles == "":
-                continue
-            data["IUPAC"].append(iupac)
-            data["SMILES"].append(smiles)
-            data["Species"].append(species)
+def convert(iupac, sd):
+    if iupac in sd:
+        return sd[iupac]
+    if iupac[0] == "[" or "(z" in iupac or " z" in iupac or "-z" in iupac:
+        return None
+    smiles = converter.convert(iupac, returning=True, silent=True)[0][1]
+    if smiles == "" or any(x in smiles for x in ["[Se", "[Te", "[Po", "[At", "[Ga", "[Ge", "[In", "[Sn", "[Sn", "[Sb", "[Tl", "[Pb", "[Bi"]):
+        return None
+    return smiles
 
-        print("\tFinished")
-        splits = split(data, split_mode)
-        df = pd.DataFrame(list(zip(*(data["IUPAC"], data["SMILES"], splits))), columns=["IUPAC", "SMILES", "Split"])
-        species = get_dummies(data["Species"])
-        df = df.join(species)
-        df.to_csv(datapath, index=False, sep="\t")
+
+def clean(level):
+    level = ast.literal_eval(level)
+    if len(level) == 0:
+        return None
+    return [x for x in level]
+
+
+def main(filepath, datapath, split_mode="random", class_level="Species", smiles_help=None):
+    """class_level from 'Species', 'Genus', 'Order', 'Class', 'Phylum', 'Kingdom', 'Domain'"""
+
+    if smiles_help is not None:
+        data = pd.read_csv(smiles_help, sep='\t')
+        sd = dict(zip(data["glycan"], data["SMILES"]))
+        del data
+    else:
+        sd = None
+
+    data = pd.read_csv(filepath, sep='\t')
+    data = data[['glycan', class_level]]
+    data[class_level] = data[class_level].apply(clean)
+    data.dropna(subset=[class_level], axis='rows', inplace=True)
+    data["SMILES"] = data["glycan"].apply(lambda x: convert(x, sd))
+    data.dropna(axis='rows', inplace=True)
+    data["split"] = split(data, split_mode)
+    labels = get_dummies(data[class_level])
+    data = pd.concat([data.reset_index(drop=True), labels.reset_index(drop=True)], axis=1)
+    data.to_csv(datapath, index=False, sep="\t")
+    print(data.shape)
 
 
 if __name__ == '__main__':
-    main("./data/glycowork_v05.tsv", "./data/filtered_data.tsv", "random")
+    main("./data/glycowork_v05.tsv", "./data/pred_species.tsv", "random", "Species", "./data/pred_species.tsv")
