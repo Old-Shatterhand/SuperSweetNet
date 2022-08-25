@@ -10,8 +10,7 @@ class GINClassModel(BaseModel):
         num_gin_layers,
         graph_embed_dim,
         num_classes,
-        mlp_hidden_dim,
-        num_mlp_layers,
+        mlp_hidden_dims,
         opt_args,
         batch_size,
     ):
@@ -24,7 +23,6 @@ class GINClassModel(BaseModel):
         )
         self.mlp = MLP(
             input_dim=graph_embed_dim,
-            hidden_dim=mlp_hidden_dim,
+            hidden_dims=mlp_hidden_dims,
             output_dim=num_classes,
-            num_layers=num_mlp_layers,
         )

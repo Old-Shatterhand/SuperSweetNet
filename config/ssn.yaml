@@ -18,8 +18,7 @@ model:
     node_embed_dim: 256
     num_gin_layers: 3
     graph_embed_dim: 256
-    mlp_hidden_dim: 512
-    num_mlp_layers: 2
+    mlp_hidden_dims: []
 optimizer:
   module: adam
   lr: 0.001
