@@ -3,8 +3,8 @@ seed: 42
 datamodule:
   filename: /home/rjo21/Desktop/SuperSweetNet/data/pred_domain.tsv
   exp_name: ssn
-  batch_size: 64
-  num_workers: 0
+  batch_size: 128
+  num_workers: 16
   num_classes: 4
 trainer:
   gpus: 1
@@ -12,13 +12,16 @@ trainer:
   profiler: null
   gradient_clip_val: 100
 model:
-  arch: gin
+  arch: sweetnet
+  hidden_dims: []
+  graph_embed_dim: 256
   gin:
     node_feat_dim: 6
     node_embed_dim: 256
-    num_gin_layers: 3
-    graph_embed_dim: 256
-    mlp_hidden_dims: []
+    num_gnn_layers: 3
+  sweetnet:
+    node_embed_dim: 128
+    num_gnn_layers: 0
 optimizer:
   module: adam
   lr: 0.001

@@ -1,8 +1,0 @@
-numpy~=1.22.3
-pandas~=1.4.2
-glyles~=0.4.0
-torchmetrics~=0.9.1
-git~=2.34.1
-yaml~=0.2.5
-pyyaml~=6.0
-torch~=1.11

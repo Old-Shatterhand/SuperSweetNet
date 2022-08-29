@@ -20,14 +20,14 @@ class GraphEncoder(LightningModule):
 
     def __init__(
         self,
+        graph_embed_dim: int,
         node_feat_dim: int,
         node_embed_dim: int,
-        num_gin_layers: int,
-        graph_embed_dim: int,
+        num_gnn_layers: int,
     ):
         super().__init__()
         self.feat_embed = MLP(node_feat_dim, [64], node_embed_dim)
-        self.node_embed = GINConvNet(node_embed_dim, num_gin_layers)
+        self.node_embed = GINConvNet(node_embed_dim, num_gnn_layers)
         self.pool = GMTNet(node_embed_dim, graph_embed_dim)
 
     def forward(self, data: Union[dict, Data], **kwargs,) -> Tuple[Tensor, Tensor]:

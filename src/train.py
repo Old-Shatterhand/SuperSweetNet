@@ -9,14 +9,15 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 
 from src.data.data import GlycanDataModule
-from src.models.gin.model import GINClassModel
+from src.models.class_model import ClassModel
+from src.models.sweetnet.transform import SweetNetTransformer
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-models = {
-    "gin": GINClassModel,
+transforms = {
     "cin": None,
-    "sweetnet": None,
+    "gin": None,
+    "sweetnet": SweetNetTransformer,
 }
 
 
@@ -34,7 +35,7 @@ def get_git_hash():
 
 
 def train(**kwargs):
-    seed_everything(kwargs["seed"])
+    # seed_everything(kwargs["seed"])
     seeds = random.sample(range(1, 100), kwargs["runs"])
 
     folder = os.path.join(
@@ -59,8 +60,12 @@ def train(**kwargs):
 
 def single_run(folder, version, **kwargs):
     """Does a single run."""
-    seed_everything(kwargs["seed"])
-    datamodule = GlycanDataModule(**kwargs["datamodule"])
+    arch = kwargs["model"]["arch"]
+    # seed_everything(kwargs["seed"])
+    datamodule = GlycanDataModule(
+        transform=transforms[arch](**kwargs["model"][arch]),
+        **kwargs["datamodule"]
+    )
 
     logger = TensorBoardLogger(
         save_dir=folder,
@@ -81,11 +86,14 @@ def single_run(folder, version, **kwargs):
         enable_model_summary=False,
         **kwargs["trainer"],
     )
-    model = models[kwargs["model"]["arch"]](
-        num_classes=kwargs["datamodule"]["num_classes"],
-        opt_args=kwargs["optimizer"],
-        batch_size=kwargs["datamodule"]["batch_size"],
-        **kwargs["model"][kwargs["model"]["arch"]]
+    model = ClassModel(
+        kwargs["model"]["graph_embed_dim"],
+        arch,
+        kwargs["model"][arch],
+        kwargs["model"]["hidden_dims"],
+        kwargs["datamodule"]["num_classes"],
+        kwargs["datamodule"]["batch_size"],
+        kwargs["optimizer"],
     )
 
     print("Model buildup finished")
