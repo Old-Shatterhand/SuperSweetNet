@@ -7,6 +7,7 @@ from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, RichModelSummary, RichProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
+from torch_geometric.data import Data
 
 from src.data.data import GlycanDataModule
 from src.models.class_model import ClassModel
@@ -14,9 +15,25 @@ from src.models.sweetnet.transform import SweetNetTransformer
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
+
+class NullTransformer:
+    """
+    Null transformer, just adding the fields that are needed to make models running in inference when trained on
+    transformed data
+    """
+
+    def __init__(self, **kwargs):
+        """Store which graphs should be transformed"""
+        pass
+
+    def __call__(self, data: Data):
+        """Add the _x_orig filed equal to _x field, mimicking an unchanged, transformed sample"""
+        return data
+
+
 transforms = {
-    "cin": None,
-    "gin": None,
+    "cin": NullTransformer,
+    "gin": NullTransformer,
     "sweetnet": SweetNetTransformer,
 }
 

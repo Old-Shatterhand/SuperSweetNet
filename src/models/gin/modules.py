@@ -1,10 +1,11 @@
 from typing import Union, Tuple
 
+import torch
 from torch import nn, Tensor, LongTensor
 import torch.nn.functional as F
 from torch.nn import ModuleList
 from torch_geometric.data import Data
-from torch_geometric.nn import GINConv, GATConv, GraphMultisetTransformer
+from torch_geometric.nn import GINConv, GraphMultisetTransformer
 from pytorch_lightning import LightningModule
 from torch_geometric.typing import Adj
 
@@ -45,7 +46,7 @@ class GraphEncoder(LightningModule):
             data = data.to_dict()
         x, edge_index, batch, edge_feats = (
             data["x"],
-            data["edge_index"],
+            data["edge_index"].to(torch.long),
             data["batch"],
             data.get("edge_feats"),
         )
@@ -72,41 +73,22 @@ class GINConvNet(LightningModule):
 
     def __init__(self, hidden_dim: int, num_layers: int = 3):
         super().__init__()
-        self.inp = GINConv(
-            nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.PReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
-            )
-        )
-        mid_layers = [
+        self.mid_layers = nn.ModuleList([
             GINConv(
                 nn.Sequential(
                     nn.Linear(hidden_dim, hidden_dim),
                     nn.PReLU(),
-                    nn.Linear(hidden_dim, hidden_dim),
+                    # nn.Linear(hidden_dim, hidden_dim),
                     nn.BatchNorm1d(hidden_dim),
                 )
             )
-            for _ in range(num_layers - 2)
-        ]
-        self.mid_layers = nn.ModuleList(mid_layers)
-        self.out = GINConv(
-            nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.PReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
-            )
-        )
+            for _ in range(num_layers)
+        ])
 
     def forward(self, x: Tensor, edge_index: Adj, **kwargs) -> Tensor:
         """"""
-        x = self.inp(x, edge_index)
         for module in self.mid_layers:
             x = module(x, edge_index)
-        x = self.out(x, edge_index)
         return x
 
 
@@ -148,5 +130,5 @@ class GMTNet(LightningModule):
 
     def forward(self, x: Tensor, edge_index: Adj, batch: LongTensor) -> Tensor:
         """"""
-        embeds = self.pool(x, batch, edge_index)
+        embeds = self.pool(x, batch, edge_index=edge_index)  # , batch=batch)
         return F.normalize(embeds, dim=1)
