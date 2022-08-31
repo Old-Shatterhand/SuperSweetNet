@@ -5,7 +5,7 @@ import git
 import yaml
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, RichModelSummary, RichProgressBar
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 import torch
 from torch_geometric.data import Data
 
@@ -52,47 +52,34 @@ def get_git_hash():
 
 
 def train(**kwargs):
-    # seed_everything(kwargs["seed"])
     seeds = random.sample(range(1, 100), kwargs["runs"])
-
-    folder = os.path.join(
-        "tb_logs",
-        f"gly_{kwargs['datamodule']['exp_name']}",
-        f"{kwargs['datamodule']['filename'].split('/')[-1].split('.')[0]}",
-    )
-    if not os.path.exists(folder):
-        os.makedirs(folder, exist_ok=True)
-
-    if len(os.listdir(folder)) == 0:
-        next_version = 0
-    else:
-        next_version = str(int([d for d in os.listdir(folder)
-                                if "version" in d and os.path.isdir(os.path.join(folder, d))][-1].split("_")[1]) + 1)
-
     for i, seed in enumerate(seeds):
         print(f"Run {i + 1} of {kwargs['runs']} with seed {seed}")
         kwargs["seed"] = seed
-        single_run(folder, next_version, **kwargs)
+        single_run(**kwargs)
 
 
-def single_run(folder, version, **kwargs):
+def single_run(**kwargs):
     """Does a single run."""
     arch = kwargs["model"]["arch"]
     # seed_everything(kwargs["seed"])
     datamodule = GlycanDataModule(
+        filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}.tsv",
         transform=transforms[arch](**kwargs["model"][arch]),
-        **kwargs["datamodule"]
+        **kwargs["datamodule"],
     )
 
-    logger = TensorBoardLogger(
+    """logger = TensorBoardLogger(
         save_dir=folder,
         name=f"version_{version}",
         version=kwargs["seed"],
         default_hp_metric=False,
-    )
+    )"""
+    logger = WandbLogger(log_model='all', project="pretrain_glycans", name=arch)
+    logger.experiment.config.update(kwargs)
 
     callbacks = [
-        ModelCheckpoint(monitor="val_loss", save_top_k=3, save_last=True, mode="min"),
+        ModelCheckpoint(monitor="loss", save_top_k=3, save_last=True, mode="min"),
         RichModelSummary(),
         RichProgressBar(),
     ]
@@ -103,19 +90,20 @@ def single_run(folder, version, **kwargs):
         enable_model_summary=False,
         **kwargs["trainer"],
     )
+    print(datamodule.train.classes)
     model = ClassModel(
         kwargs["model"]["graph_embed_dim"],
         arch,
         kwargs["model"][arch],
         kwargs["model"]["hidden_dims"],
-        kwargs["datamodule"]["num_classes"],
+        datamodule.train.classes,
         kwargs["datamodule"]["batch_size"],
         kwargs["optimizer"],
     )
 
     print("Model buildup finished")
     trainer.fit(model, datamodule)
-    trainer.test(model, datamodule)
+    # trainer.test(model, datamodule)
 
 
 if __name__ == "__main__":

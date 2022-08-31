@@ -1,6 +1,9 @@
 from typing import Tuple, List
 
+import pandas as pd
 import torch
+import wandb
+from matplotlib import pyplot as plt
 from pytorch_lightning import LightningModule
 import torch.nn.functional as F
 from torch import Tensor
@@ -8,7 +11,10 @@ from torch.optim import AdamW, Adam, SGD, RMSprop
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch import nn
 from torch_geometric.data import Data
-from torchmetrics import MetricCollection, Accuracy, MatthewsCorrCoef
+from torchmetrics import Accuracy, MatthewsCorrCoef, ConfusionMatrix
+import plotly.express as px
+
+from src.models.metrics import EmbeddingMetric
 
 
 class MLP(LightningModule):
@@ -49,22 +55,16 @@ class MLP(LightningModule):
 
 
 class BaseModel(LightningModule):
-    def __init__(self, num_classes, batch_size, opt_args):
+    def __init__(self, classes, batch_size, opt_args):
         super().__init__()
-        self._set_class_metrics(num_classes)
+        self.classes = classes
+        self.num_classes = len(classes)
         self.batch_size = batch_size
         self.opt_config = opt_args
-
-    def _set_class_metrics(self, num_classes: int):
-        metrics = MetricCollection(
-            [
-                Accuracy(num_classes=None if num_classes == 2 else num_classes),
-                MatthewsCorrCoef(num_classes=num_classes),
-            ]
-        )
-        self.train_metrics = metrics.clone(prefix="train_")
-        self.val_metrics = metrics.clone(prefix="val_")
-        self.test_metrics = metrics.clone(prefix="test_")
+        self.acc = Accuracy(num_classes=self.num_classes)
+        self.mcc = MatthewsCorrCoef(num_classes=self.num_classes)
+        self.confmat = ConfusionMatrix(num_classes=self.num_classes, normalize='true')
+        self.embed = EmbeddingMetric(classes=classes)
 
     def forward(self, drug: Data) -> dict:
         """
@@ -79,7 +79,7 @@ class BaseModel(LightningModule):
             pred=self.mlp(drug_embed),
         )
 
-    def shared_step(self, data: Data) -> dict:
+    def training_step(self, data: Data) -> dict:
         """Step that is the same for train, validation and test.
 
         Returns:
@@ -88,61 +88,55 @@ class BaseModel(LightningModule):
         fwd_dict = self.forward(data)
         labels = data.y
         ce_loss = F.cross_entropy(fwd_dict["pred"], labels.float().argmax(dim=1))
-        return dict(loss=ce_loss, preds=fwd_dict["pred"].detach(), labels=labels.detach())
 
-    def training_step(self, data: Data, data_idx: int) -> dict:
-        """What to do during training step."""
-        ss = self.shared_step(data)
-        self.train_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
-        self.log("train_loss", ss["loss"], batch_size=self.batch_size)
-        return ss
+        self.acc.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
+        self.mcc.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
 
-    def validation_step(self, data: Data, data_idx: int) -> dict:
-        """What to do during validation step. Also logs the values for various callbacks."""
-        ss = self.shared_step(data)
-        self.val_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
-        self.log("val_loss", ss["loss"], batch_size=self.batch_size)
-        return ss
+        if self.global_step % 100 == 0:
+            self.confmat.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
+            self.embed.update(fwd_dict["drug_embed"].detach(), labels.detach().argmax(dim=1))
 
-    def test_step(self, data: Data, data_idx: int) -> dict:
-        """What to do during test step. Also logs the values for various callbacks."""
-        ss = self.shared_step(data)
-        self.test_metrics.update(ss["preds"].argmax(dim=1), ss["labels"].argmax(dim=1))
-        self.log("test_loss", ss["loss"], batch_size=self.batch_size)
-        return ss
+        self.log("loss", ce_loss, batch_size=self.batch_size)
 
-    def log_histograms(self):
-        """Logs the histograms of all the available parameters."""
-        if self.logger:
-            for name, param in self.named_parameters():
-                self.logger.experiment.add_histogram(name, param, self.current_epoch)
-
-    def log_all(self, metrics: dict, hparams: bool = False):
-        """Log all metrics."""
-        if self.logger:
-            for k, v in metrics.items():
-                self.logger.experiment.add_scalar(k, v, self.current_epoch)
-            if hparams:
-                self.logger.log_hyperparams(self.hparams, {k.split("_")[-1]: v for k, v in metrics.items()})
+        output = dict(
+            loss=ce_loss,
+            preds=fwd_dict["pred"].detach(),
+            labels=labels.detach(),
+            drug_embed=fwd_dict["drug_embed"].detach(),
+        )
+        if fwd_dict["node_embeds"] is not None:
+            output["node_embeds"] = fwd_dict["node_embeds"].detach()
+        return output
 
     def training_epoch_end(self, outputs: dict):
         """What to do at the end of a training epoch. Logs everything."""
-        self.log_histograms()
-        metrics = self.train_metrics.compute()
-        self.train_metrics.reset()
-        self.log_all(metrics)
+        self.log("accuracy", self.acc.compute())
+        self.acc.reset()
+        self.log("matthews", self.mcc.compute())
+        self.mcc.reset()
+        if self.global_step % 100 == 0:
+            wandb.log(dict(
+                confusion_matrix=self.log_confmat(),
+                embeddings_tsne=self.embed.compute(),
+            ))
+            self.embed.reset()
+            plt.clf()
 
-    def validation_epoch_end(self, outputs: dict):
-        """What to do at the end of a validation epoch. Logs everything."""
-        metrics = self.val_metrics.compute()
-        self.val_metrics.reset()
-        self.log_all(metrics, hparams=True)
+    def log_confmat(self):
+        """Log confusion matrix to wandb."""
+        confmat_df = self.confmat.compute().detach().cpu().numpy()
+        self.confmat.reset()
 
-    def test_epoch_end(self, outputs: dict):
-        """What to do at the end of a test epoch. Logs everything."""
-        metrics = self.test_metrics.compute()
-        self.test_metrics.reset()
-        self.log_all(metrics)
+        confmat_df = pd.DataFrame(confmat_df, index=self.classes, columns=self.classes).round(2)
+        return px.imshow(
+            confmat_df,
+            zmin=0,
+            zmax=1,
+            text_auto=True,
+            width=400,
+            height=400,
+            color_continuous_scale=px.colors.sequential.Viridis,
+        )
 
     def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
         """Configure the optimizer and/or lr schedulers"""

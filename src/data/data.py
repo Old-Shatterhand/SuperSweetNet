@@ -51,24 +51,15 @@ class GlycanDataModule(LightningDataModule):
         self.shuffle = shuffle
 
         """Load the individual datasets"""
-        self.train = GlycanDataset(self.filename, self.exp_name, split="train", transform=transform).shuffle()
-        self.val = GlycanDataset(self.filename, self.exp_name, split="val", transform=transform).shuffle()
-        self.test = GlycanDataset(self.filename, self.exp_name, split="test", transform=transform).shuffle()
+        self.train = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
+        self.val = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
+        self.test = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
 
     def update_config(self, config: dict) -> None:
         raise NotImplementedError
 
     def train_dataloader(self):
         return DataLoader(self.train, **self._dl_kwargs(True))
-
-    def val_dataloader(self):
-        return DataLoader(self.val, **self._dl_kwargs(False))
-
-    def test_dataloader(self):
-        return DataLoader(self.test, **self._dl_kwargs(False))
-
-    def predict_dataloader(self):
-        return DataLoader(self.test, **self._dl_kwargs(False))
 
     def _dl_kwargs(self, shuffle: bool = False):
         return dict(
@@ -84,13 +75,11 @@ class GlycanDataset(InMemoryDataset):
             self,
             filename: str,
             exp_name: str,
-            split: str = "train",
             transform=None,
     ):
         root = self._set_filenames(filename, exp_name)
-        self.splits = {"train": 0, "val": 1, "test": 2}
         super().__init__(root, transform=transform)
-        self.data, self.slices = torch.load(self.processed_paths[self.splits[split]])
+        self.data, self.slices, self.classes = torch.load(self.processed_paths[0])
 
     def _set_filenames(self, filename: str, exp_name: str) -> str:
         basefilename = os.path.basename(filename)
@@ -101,22 +90,25 @@ class GlycanDataset(InMemoryDataset):
     @property
     def processed_file_names(self) -> Union[str, List[str], Tuple]:
         """Files that are created."""
-        return [k + ".pt" for k in self.splits.keys()]
+        return ['train.pt']
 
     def process(self):
         with open(self.filename, "r") as data_input:
-            data_list = {k: [] for k in self.splits.keys()}
-            for line in data_input.readlines()[1:]:
-                parts = line.strip().split("\t")
-                iupac, level, smiles, split = parts[0:4]
-                y = torch.tensor([int(float(x)) for x in parts[4:]])
-                x, edge_index = get_graph(smiles)
-                if x is None and edge_index is None:
-                    continue
-                data_list[split].append(Data(x=x, edge_index=edge_index, y=y.unsqueeze(0), iupac=iupac, level=level))
-            for split in self.splits.keys():
-                data, slices = self.collate(data_list[split])
-                torch.save((data, slices), self.processed_paths[self.splits[split]])
+            data_list = []
+            classes = []
+            for i, line in enumerate(data_input.readlines()):
+                if i == 0:
+                    classes = line.strip().split("\t")[4:]
+                else:
+                    parts = line.strip().split("\t")
+                    iupac, level, smiles, split = parts[0:4]
+                    y = torch.tensor([int(float(x)) for x in parts[4:]])
+                    x, edge_index = get_graph(smiles)
+                    if x is None and edge_index is None:
+                        continue
+                    data_list.append(Data(x=x, edge_index=edge_index, y=y.unsqueeze(0), iupac=iupac, level=level))
+            data, slices = self.collate(data_list)
+            torch.save((data, slices, classes), self.processed_paths[0])
 
 
 def encode_atom(atom):

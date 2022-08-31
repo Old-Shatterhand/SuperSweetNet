@@ -16,14 +16,14 @@ class ClassModel(BaseModel):
             encoder,
             encoder_args,
             mlp_hidden_dims,
-            num_classes,
+            classes,
             batch_size,
             opt_args,
     ):
-        super(ClassModel, self).__init__(num_classes, batch_size, opt_args)
+        super(ClassModel, self).__init__(classes, batch_size, opt_args)
         self.drug_encoder = encoders[encoder](graph_embed_dim, **encoder_args)
         self.mlp = MLP(
             input_dim=graph_embed_dim,
             hidden_dims=mlp_hidden_dims,
-            output_dim=num_classes,
+            output_dim=len(classes),
         )

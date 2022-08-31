@@ -1,7 +1,7 @@
 runs: 1
 seed: 42
 datamodule:
-  filename: /home/rjo21/Desktop/SuperSweetNet/data/pred_domain.tsv
+  task: domain
   exp_name: ssn
   batch_size: 128
   num_workers: 16
@@ -12,7 +12,7 @@ trainer:
   profiler: null
   gradient_clip_val: 100
 model:
-  arch: gin
+  arch: sweetnet
   hidden_dims: []
   graph_embed_dim: 256
   gin:
@@ -30,4 +30,4 @@ optimizer:
   reduce_lr:
     factor: 0.1
     patience: 20
-    monitor: val_loss
+    monitor: loss
