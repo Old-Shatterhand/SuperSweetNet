@@ -80,6 +80,7 @@ def single_run(**kwargs):
 
     callbacks = [
         ModelCheckpoint(monitor="loss", save_top_k=3, save_last=True, mode="min"),
+        EarlyStopping(monitor=kwargs["early_stop"]["monitor"], mode=kwargs["early_stop"]["mode"], **kwargs["early_stop"]),
         RichModelSummary(),
         RichProgressBar(),
     ]

@@ -8,13 +8,15 @@ from pytorch_lightning import LightningModule
 import torch.nn.functional as F
 from torch import Tensor
 from torch.optim import AdamW, Adam, SGD, RMSprop
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from torch import nn
 from torch_geometric.data import Data
 from torchmetrics import Accuracy, MatthewsCorrCoef, ConfusionMatrix
 import plotly.express as px
 
 from src.models.metrics import EmbeddingMetric
+from src.models.lr_schedules.LWCA import LinearWarmupCosineAnnealingLR
+from src.models.lr_schedules.LWCAWR import LinearWarmupCosineAnnealingWarmRestartsLR
 
 
 class MLP(LightningModule):
@@ -159,4 +161,41 @@ class BaseModel(LightningModule):
                 patience=self.opt_config["reduce_lr"]["patience"],
             ),
         }
-        return [optimizer], [lr_scheduler]
+        return [optimizer], [self.parse_lr_scheduler(optimizer, opt_params, opt_params["lr_schedule"])]
+
+    def parse_lr_scheduler(self, optimizer, opt_params, lr_params):
+        """Parse learning rate scheduling based on config args"""
+        lr_scheduler = {"monitor": self.hparams["early_stop"]["monitor"]}
+        if lr_params["module"] == "rlrop":
+            lr_scheduler["scheduler"] = ReduceLROnPlateau(
+                optimizer,
+                verbose=True,
+                factor=lr_params["factor"],
+                patience=lr_params["patience"],
+            )
+        elif lr_params["module"] == "calr":
+            lr_scheduler["scheduler"] = CosineAnnealingLR(
+                optimizer,
+                peak_lr=float(opt_params["lr"]),
+            )
+        elif lr_params["module"] == "lwcawr":
+            lr_scheduler["scheduler"] = LinearWarmupCosineAnnealingWarmRestartsLR(
+                optimizer,
+                warmup_epochs=lr_params["warmup_epochs"],
+                start_lr=float(lr_params["start_lr"]),
+                peak_lr=float(opt_params["lr"]),
+                cos_restart_dist=lr_params["cos_restart_dist"],
+                cos_eta_min=float(lr_params["min_lr"])
+            )
+        elif lr_params["module"] == "lwca":
+            lr_scheduler["scheduler"] = LinearWarmupCosineAnnealingLR(
+                optimizer,
+                warmup_epochs=lr_params["warmup_epochs"],
+                max_epochs=lr_params["cos_restart_dist"],
+                eta_min=float(lr_params["min_lr"]),
+                warmup_start_lr=float(lr_params["start_lr"]),
+            )
+        else:
+            raise ValueError("Unknown learning rate scheduler")
+
+        return lr_scheduler
