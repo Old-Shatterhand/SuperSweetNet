@@ -75,7 +75,7 @@ def single_run(**kwargs):
         version=kwargs["seed"],
         default_hp_metric=False,
     )"""
-    logger = WandbLogger(log_model='all', project="pretrain_glycans", name=arch)
+    logger = WandbLogger(log_model='all', project="pretrain_glycans", name=arch + "_" + kwargs["model"]["postfix"])
     logger.experiment.config.update(kwargs)
 
     callbacks = [
