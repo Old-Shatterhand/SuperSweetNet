@@ -1,33 +1,13 @@
+import copy
 import os
 from typing import Union, List, Tuple, Callable
 
+from rdkit import Chem
 import torch
 from pytorch_lightning import LightningDataModule
 from torch_geometric.data import InMemoryDataset, Data
+from torch_geometric.data.separate import separate
 from torch_geometric.loader import DataLoader
-from rdkit import Chem
-from rdkit.Chem import rdmolfiles, rdmolops
-from rdkit.Chem.rdchem import ChiralType
-
-
-encodings = {
-    "glycan": {
-        "other": [0, 0, 0],
-        6: [1, 0, 0],  # carbon
-        7: [0, 1, 0],  # nitrogen
-        8: [0, 0, 1],  # oxygen
-    },
-    "chirality": {
-        ChiralType.CHI_OTHER: [0, 0, 0],
-        ChiralType.CHI_TETRAHEDRAL_CCW: [
-            1,
-            1,
-            0,
-        ],  # counterclockwise rotation of polarized light -> rotate light to the left
-        ChiralType.CHI_TETRAHEDRAL_CW: [1, 0, 1],  # clockwise rotation of polarized light -> rotate light to the right
-        ChiralType.CHI_UNSPECIFIED: [0, 0, 0],
-    },
-}
 
 
 class GlycanDataModule(LightningDataModule):
@@ -40,6 +20,9 @@ class GlycanDataModule(LightningDataModule):
             batch_size: int = 128,
             num_workers: int = 1,
             shuffle: bool = True,
+            pre_transform: Callable = None,
+            init_filter: Callable = None,
+            init_transform: Callable = None,
             transform: Callable = None,
             **kwargs,
     ):
@@ -51,9 +34,10 @@ class GlycanDataModule(LightningDataModule):
         self.shuffle = shuffle
 
         """Load the individual datasets"""
-        self.train = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
-        self.val = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
-        self.test = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
+        self.train = GlycanDataset(self.filename, self.exp_name, pre_transform=pre_transform, init_filter=init_filter,
+                                   init_transform=init_transform, transform=transform).shuffle()
+        # self.val = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
+        # self.test = GlycanDataset(self.filename, self.exp_name, transform=transform).shuffle()
 
     def update_config(self, config: dict) -> None:
         raise NotImplementedError
@@ -75,11 +59,48 @@ class GlycanDataset(InMemoryDataset):
             self,
             filename: str,
             exp_name: str,
+            pre_transform: Callable = None,
+            init_filter: Callable = None,
+            init_transform: Callable = None,
             transform=None,
     ):
+        self.loaded = False
         root = self._set_filenames(filename, exp_name)
-        super().__init__(root, transform=transform)
-        self.data, self.slices, self.classes = torch.load(self.processed_paths[0])
+        super(GlycanDataset, self).__init__(root, pre_transform=pre_transform, transform=transform)
+        self.classes = None
+
+        if init_filter is not None or init_transform is not None:
+            self.unsaved_preps(init_filter, init_transform)
+        else:
+            self.data, self.slices, self.classes = torch.load(self.processed_paths[0])
+
+    def unsaved_preps(self, init_filter, init_transform):
+        tmp_data, tmp_slices, self.classes = torch.load(self.processed_paths[0])
+
+        def get(idx):
+            return separate(
+                cls=tmp_data.__class__,
+                batch=tmp_data,
+                idx=idx,
+                slice_dict=tmp_slices,
+                decrement=False,
+            )
+
+        if init_filter is not None:
+            datalist = list(filter(init_filter, [get(i) for i in range(tmp_data["y"].size(0))]))
+            if init_transform is not None:
+                datalist = [init_transform(d) for d in datalist]
+        elif init_transform is not None:
+            datalist = [init_transform(d) for d in [get(i) for i in range(tmp_data["y"].size(0))]]
+        if init_filter is not None or init_transform is not None:
+            # print(all([Chem.MolFromSmiles(d["smiles"]) is not None for d in datalist]))
+            self.data, self.slices = self.collate(datalist)
+            # print(all([Chem.MolFromSmiles(d) is not None for d in self.data["smiles"]]))
+
+        self.loaded = True
+        # print(all([Chem.MolFromSmiles(self[i]["smiles"]) is not None for i in range(len(self.data))]))
+        # print(all([Chem.MolFromSmiles(d["smiles"]) is not None for d in self]))
+        print("Initializing done")
 
     def _set_filenames(self, filename: str, exp_name: str) -> str:
         basefilename = os.path.basename(filename)
@@ -102,34 +123,7 @@ class GlycanDataset(InMemoryDataset):
                 else:
                     parts = line.strip().split("\t")
                     iupac, level, smiles, split = parts[0:4]
-                    y = torch.tensor([int(float(x)) for x in parts[4:]])
-                    x, edge_index = get_graph(smiles)
-                    if x is None and edge_index is None:
-                        continue
-                    data_list.append(Data(x=x, edge_index=edge_index, y=y.unsqueeze(0), iupac=iupac, level=level))
+                    y = torch.tensor([int(float(x)) for x in parts[4:]]).unsqueeze(0)
+                    data_list.append(Data(x=None, edge_index=None, y=y, iupac=iupac, level=level, smiles=smiles))
             data, slices = self.collate(data_list)
             torch.save((data, slices, classes), self.processed_paths[0])
-
-
-def encode_atom(atom):
-    if atom.GetAtomicNum() in encodings["glycan"]:
-        return encodings["glycan"][atom.GetAtomicNum()] + encodings["chirality"][atom.GetChiralTag()]
-    else:
-        return encodings["glycan"]["other"] + encodings["chirality"][atom.GetChiralTag()]
-
-
-def get_graph(smiles):
-    mol = Chem.MolFromSmiles(smiles)
-    if not mol:
-        return None, None
-    new_order = rdmolfiles.CanonicalRankAtoms(mol)
-    mol = rdmolops.RenumberAtoms(mol, new_order)
-    edges = []
-    for bond in mol.GetBonds():
-        start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-        edges.append([start, end])
-        edges.append([end, start])
-    atom_features = []
-    for atom in mol.GetAtoms():
-        atom_features.append(encode_atom(atom))
-    return torch.tensor(atom_features, dtype=torch.float), torch.tensor(edges, dtype=torch.long).T

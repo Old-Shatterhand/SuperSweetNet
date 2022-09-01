@@ -42,3 +42,17 @@ class EmbeddingMetric(Metric):
             size="size",
             title="Embedding tSNE",
         )
+
+
+class MCMLAccuracy(Metric):
+    def __init__(self):
+        super(MCMLAccuracy, self).__init__()
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, embeddings, labels) -> None:
+        self.count += torch.sum(torch.where(embeddings > 0.5, 1, 0) == labels)
+        self.total += torch.prod(torch.tensor(labels.size()))
+
+    def compute(self) -> Any:
+        return (self.count / self.total).item()

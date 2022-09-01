@@ -7,33 +7,27 @@ from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, RichModelSummary, RichProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 import torch
+from rdkit import Chem
 from torch_geometric.data import Data
 
 from src.data.data import GlycanDataModule
 from src.models.class_model import ClassModel
+from src.models.gin.transform import SMILESTransformer
 from src.models.sweetnet.transform import SweetNetTransformer
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 
-class NullTransformer:
-    """
-    Null transformer, just adding the fields that are needed to make models running in inference when trained on
-    transformed data
-    """
-
-    def __init__(self, **kwargs):
-        """Store which graphs should be transformed"""
-        pass
-
-    def __call__(self, data: Data):
-        """Add the _x_orig filed equal to _x field, mimicking an unchanged, transformed sample"""
-        return data
+init_filters = {
+    "cin": None,
+    "gin": lambda x: len(x["smiles"]) > 10 and Chem.MolFromSmiles(x["smiles"]) is not None,
+    "sweetnet": None,
+}
 
 
-transforms = {
-    "cin": NullTransformer,
-    "gin": NullTransformer,
+init_transforms = {
+    "cin": lambda x: x,
+    "gin": SMILESTransformer,
     "sweetnet": SweetNetTransformer,
 }
 
@@ -52,6 +46,7 @@ def get_git_hash():
 
 
 def train(**kwargs):
+    seed_everything(42)
     seeds = random.sample(range(1, 100), kwargs["runs"])
     for i, seed in enumerate(seeds):
         print(f"Run {i + 1} of {kwargs['runs']} with seed {seed}")
@@ -62,10 +57,11 @@ def train(**kwargs):
 def single_run(**kwargs):
     """Does a single run."""
     arch = kwargs["model"]["arch"]
-    # seed_everything(kwargs["seed"])
+    seed_everything(kwargs["seed"])
     datamodule = GlycanDataModule(
         filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}.tsv",
-        transform=transforms[arch](**kwargs["model"][arch]),
+        init_filter=init_filters[arch],
+        init_transform=init_transforms[arch](**kwargs["model"][arch]),
         **kwargs["datamodule"],
     )
 
@@ -80,7 +76,7 @@ def single_run(**kwargs):
 
     callbacks = [
         ModelCheckpoint(monitor="loss", save_top_k=3, save_last=True, mode="min"),
-        EarlyStopping(monitor=kwargs["early_stop"]["monitor"], mode=kwargs["early_stop"]["mode"], **kwargs["early_stop"]),
+        EarlyStopping(monitor=kwargs["early_stop"]["monitor"], mode=kwargs["early_stop"]["mode"], patience=kwargs["early_stop"]["patience"]),
         RichModelSummary(),
         RichProgressBar(),
     ]

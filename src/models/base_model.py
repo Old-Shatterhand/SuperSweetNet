@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 from pytorch_lightning import LightningModule
 import torch.nn.functional as F
 from torch import Tensor
+from torch.nn import CrossEntropyLoss
 from torch.optim import AdamW, Adam, SGD, RMSprop
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from torch import nn
@@ -14,9 +15,17 @@ from torch_geometric.data import Data
 from torchmetrics import Accuracy, MatthewsCorrCoef, ConfusionMatrix
 import plotly.express as px
 
-from src.models.metrics import EmbeddingMetric
+from src.models.metrics import EmbeddingMetric, MCMLAccuracy
 from src.models.lr_schedules.LWCA import LinearWarmupCosineAnnealingLR
 from src.models.lr_schedules.LWCAWR import LinearWarmupCosineAnnealingWarmRestartsLR
+
+
+optimizers = {
+    "adamw": AdamW,
+    "adam": Adam,
+    "sgd": SGD,
+    "rmsprop": RMSprop,
+}
 
 
 class MLP(LightningModule):
@@ -63,10 +72,11 @@ class BaseModel(LightningModule):
         self.num_classes = len(classes)
         self.batch_size = batch_size
         self.opt_config = opt_args
-        self.acc = Accuracy(num_classes=self.num_classes)
-        self.mcc = MatthewsCorrCoef(num_classes=self.num_classes)
-        self.confmat = ConfusionMatrix(num_classes=self.num_classes, normalize='true')
+        self.acc = MCMLAccuracy()
+        # self.mcc = MatthewsCorrCoef(num_classes=self.num_classes)
+        self.confmat = ConfusionMatrix(num_classes=self.num_classes)  # , normalize='true')
         self.embed = EmbeddingMetric(classes=classes)
+        self.loss_fn = CrossEntropyLoss()
 
     def forward(self, drug: Data) -> dict:
         """
@@ -89,10 +99,10 @@ class BaseModel(LightningModule):
         """
         fwd_dict = self.forward(data)
         labels = data.y
-        ce_loss = F.cross_entropy(fwd_dict["pred"], labels.float().argmax(dim=1))
+        ce_loss = self.loss_fn(fwd_dict["pred"], labels.float())
 
-        self.acc.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
-        self.mcc.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
+        self.acc.update(fwd_dict["pred"].detach(), labels.detach())
+        # self.mcc.update(fwd_dict["pred"].detach(), labels.detach())
 
         if self.global_step % 100 == 0:
             self.confmat.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
@@ -114,8 +124,8 @@ class BaseModel(LightningModule):
         """What to do at the end of a training epoch. Logs everything."""
         self.log("accuracy", self.acc.compute())
         self.acc.reset()
-        self.log("matthews", self.mcc.compute())
-        self.mcc.reset()
+        # self.log("matthews", self.mcc.compute())
+        # self.mcc.reset()
         if self.global_step % 100 == 0:
             wandb.log(dict(
                 confusion_matrix=self.log_confmat(),
@@ -142,30 +152,13 @@ class BaseModel(LightningModule):
 
     def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
         """Configure the optimizer and/or lr schedulers"""
-        opt_class = {"adamw": AdamW, "adam": Adam, "sgd": SGD, "rmsprop": RMSprop}[self.opt_config["module"]]
-        opt_params = {
-            "params": self.parameters(),
-            "lr": self.opt_config["lr"],
-            "weight_decay": self.opt_config["weight_decay"],
-        }
-        if self.opt_config["module"] in ["sgd", "rmsprop"]:  # not adam or adamw
-            opt_params["momentum"] = self.opt_config["momentum"]
-        optimizer = opt_class(**opt_params)
+        optimizer = optimizers[self.opt_config["module"]](params=self.parameters(), lr=self.opt_config["lr"], weight_decay=self.opt_config["weight_decay"])
 
-        lr_scheduler = {
-            "monitor": self.opt_config["reduce_lr"]["monitor"],
-            "scheduler": ReduceLROnPlateau(
-                optimizer,
-                verbose=True,
-                factor=self.opt_config["reduce_lr"]["factor"],
-                patience=self.opt_config["reduce_lr"]["patience"],
-            ),
-        }
-        return [optimizer], [self.parse_lr_scheduler(optimizer, opt_params, opt_params["lr_schedule"])]
+        return [optimizer], [self.parse_lr_scheduler(optimizer, self.opt_config, self.opt_config["lr_schedule"])]
 
     def parse_lr_scheduler(self, optimizer, opt_params, lr_params):
         """Parse learning rate scheduling based on config args"""
-        lr_scheduler = {"monitor": self.hparams["early_stop"]["monitor"]}
+        lr_scheduler = {"monitor": "loss"}
         if lr_params["module"] == "rlrop":
             lr_scheduler["scheduler"] = ReduceLROnPlateau(
                 optimizer,
@@ -176,7 +169,7 @@ class BaseModel(LightningModule):
         elif lr_params["module"] == "calr":
             lr_scheduler["scheduler"] = CosineAnnealingLR(
                 optimizer,
-                peak_lr=float(opt_params["lr"]),
+                T_max=float(opt_params["lr"]),
             )
         elif lr_params["module"] == "lwcawr":
             lr_scheduler["scheduler"] = LinearWarmupCosineAnnealingWarmRestartsLR(

@@ -7,6 +7,9 @@ import pandas as pd
 from glyles import converter
 
 
+IUPAC, SMILES = 0, 1
+
+
 class suppress_stdout_stderr(object):
     """
     A context manager for doing a "deep suppression" of stdout and stderr in
@@ -64,7 +67,19 @@ def split(data, mode):
 def convert(iupac, sd):
     if iupac in sd:
         return sd[iupac]
-    if iupac[0] == "[" or "(z" in iupac or " z" in iupac or "-z" in iupac:
+    if iupac[0] == "[" \
+            or "(z" in iupac \
+            or " z" in iupac \
+            or "-z" in iupac \
+            or '-ulosaric' in iupac \
+            or '-ulosonic' in iupac \
+            or '-uronic' in iupac \
+            or '-aric' in iupac \
+            or '0dHex' in iupac \
+            or 'Anhydro' in iupac \
+            or 'en' in iupac \
+            or 'Coum' in iupac \
+            or 'Ins' in iupac:
         return None
     smiles = converter.convert(iupac, returning=True, silent=True)[0][1]
     if smiles == "" or any(x in smiles for x in ["[Se", "[Te", "[Po", "[At", "[Ga", "[Ge", "[In", "[Sn", "[Sn", "[Sb", "[Tl", "[Pb", "[Bi"]):
@@ -80,6 +95,7 @@ def clean(level):
 
 
 def main(filepath, datapath, split_mode="random", class_level="Species", smiles_help=None):
+    datapath = datapath.replace("?", class_level.lower())
     """class_level from 'Species', 'Genus', 'Order', 'Class', 'Phylum', 'Kingdom', 'Domain'"""
 
     if smiles_help is not None:
@@ -87,14 +103,13 @@ def main(filepath, datapath, split_mode="random", class_level="Species", smiles_
         sd = dict(zip(data["glycan"], data["SMILES"]))
         del data
     else:
-        sd = None
+        sd = {}
 
     data = pd.read_csv(filepath, sep='\t')
     data = data[['glycan', class_level]]
     data[class_level] = data[class_level].apply(clean)
     data.dropna(subset=[class_level], axis='rows', inplace=True)
     data["SMILES"] = data["glycan"].apply(lambda x: convert(x, sd))
-    data.dropna(axis='rows', inplace=True)
     data["split"] = split(data, split_mode)
     labels = get_dummies(data[class_level])
     data = pd.concat([data.reset_index(drop=True), labels.reset_index(drop=True)], axis=1)
@@ -103,4 +118,4 @@ def main(filepath, datapath, split_mode="random", class_level="Species", smiles_
 
 
 if __name__ == '__main__':
-    main("./data/glycowork_v05.tsv", "./data/pred_species.tsv", "random", "Species", "./data/pred_species.tsv")
+    main("./data/glycowork_v05.tsv", "./data/pred_?.tsv", "random", "Domain", "./data/pred_species.tsv")

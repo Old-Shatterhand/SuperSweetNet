@@ -7,16 +7,16 @@ datamodule:
   num_workers: 16
   num_classes: 4
 trainer:
-  gpus: 1
+  gpus: 0
   max_epochs: 1000
   profiler: null
   gradient_clip_val: 100
 early_stop:
   patience: 50
-  monitor: val_loss
+  monitor: loss
   mode: min
 model:
-  postfix: paper_2
+  postfix: mcml
   arch: sweetnet
   hidden_dims: []
   graph_embed_dim: 256
