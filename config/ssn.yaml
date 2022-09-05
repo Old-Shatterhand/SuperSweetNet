@@ -7,26 +7,24 @@ datamodule:
   num_workers: 16
   num_classes: 4
 trainer:
-  gpus: 0
+  gpus: 1
   max_epochs: 1000
   profiler: null
   gradient_clip_val: 100
 early_stop:
-  patience: 50
+  patience: 100
   monitor: loss
   mode: min
 model:
-  postfix: mcml
-  arch: sweetnet
-  hidden_dims: []
+  postfix: blub
+  arch: gin
+  hidden_dims: [1024, 512]
   graph_embed_dim: 256
   gin:
     node_feat_dim: 6
     node_embed_dim: 512
     num_gnn_layers: 3
-  sweetnet:
-    node_embed_dim: 256
-    num_gnn_layers: 3
+  sweetnet: {}
 optimizer:
   module: adam
   lr: 0.0005

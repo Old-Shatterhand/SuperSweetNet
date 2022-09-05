@@ -5,7 +5,7 @@ from torch import nn, Tensor, LongTensor
 import torch.nn.functional as F
 from torch.nn import ModuleList
 from torch_geometric.data import Data
-from torch_geometric.nn import GINConv, GraphMultisetTransformer
+from torch_geometric.nn import GINConv, GraphMultisetTransformer, global_mean_pool
 from pytorch_lightning import LightningModule
 from torch_geometric.typing import Adj
 
@@ -27,9 +27,10 @@ class GraphEncoder(LightningModule):
         num_gnn_layers: int,
     ):
         super().__init__()
-        self.feat_embed = MLP(node_feat_dim, [64], node_embed_dim)
-        self.node_embed = GINConvNet(node_embed_dim, num_gnn_layers)
-        self.pool = GMTNet(node_embed_dim, graph_embed_dim)
+        self.feat_embed = MLP(node_feat_dim, [64], graph_embed_dim)
+        self.node_embed = GINConvNet(graph_embed_dim, num_gnn_layers)
+        # self.pool = GMTNet(node_embed_dim, 2 * graph_embed_dim)
+        self.pool = global_mean_pool
 
     def forward(self, data: Union[dict, Data], **kwargs,) -> Tuple[Tensor, Tensor]:
         r"""Encode a graph.
@@ -50,14 +51,15 @@ class GraphEncoder(LightningModule):
             data["batch"],
             data.get("edge_feats"),
         )
-        feat_embed = self.feat_embed(x)
+        feat_embed, _ = self.feat_embed(x)
         node_embed = self.node_embed(
             x=feat_embed,
             edge_index=edge_index,
             edge_feats=edge_feats,
             batch=batch,
         )
-        embed = self.pool(x=node_embed, edge_index=edge_index, batch=batch)
+        embed = self.pool(x=node_embed, batch=batch)
+
         return embed, node_embed
 
 
@@ -77,7 +79,7 @@ class GINConvNet(LightningModule):
             GINConv(
                 nn.Sequential(
                     nn.Linear(hidden_dim, hidden_dim),
-                    nn.PReLU(),
+                    nn.ReLU(),
                     # nn.Linear(hidden_dim, hidden_dim),
                     nn.BatchNorm1d(hidden_dim),
                 )
@@ -130,5 +132,5 @@ class GMTNet(LightningModule):
 
     def forward(self, x: Tensor, edge_index: Adj, batch: LongTensor) -> Tensor:
         """"""
-        embeds = self.pool(x, batch, edge_index=edge_index)  # , batch=batch)
+        embeds = self.pool(x, batch, edge_index=edge_index)
         return F.normalize(embeds, dim=1)

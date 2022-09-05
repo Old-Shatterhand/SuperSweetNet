@@ -17,14 +17,15 @@ class SweetNetEncoder(LightningModule):
     def __init__(
             self,
             graph_embed_dim,
-            node_embed_dim,
-            num_gnn_layers,
+            # node_embed_dim,
+            # num_gnn_layers,
     ):
         super().__init__()
-        self.num_gnn_layers = num_gnn_layers
+        # self.num_gnn_layers = num_gnn_layers
+        self.node_embed_dim = graph_embed_dim // 2
 
         # node embedding
-        self.item_embedding = torch.nn.Embedding(num_embeddings=len(lib) + 1, embedding_dim=node_embed_dim)
+        self.item_embedding = torch.nn.Embedding(num_embeddings=len(lib) + 1, embedding_dim=self.node_embed_dim)
 
         # self.single_embed = torch.nn.Linear(node_embed_dim, graph_embed_dim)
 
@@ -34,25 +35,12 @@ class SweetNetEncoder(LightningModule):
         for _ in range(num_gnn_layers):
             self.convs.append(GraphConv(node_embed_dim, node_embed_dim))
             self.pools.append(TopKPooling(node_embed_dim, ratio=1.0))"""
-        self.conv1 = GraphConv(node_embed_dim, node_embed_dim)
-        self.pool1 = TopKPooling(node_embed_dim, ratio=0.8)
-        self.conv2 = GraphConv(node_embed_dim, node_embed_dim)
-        self.pool2 = TopKPooling(node_embed_dim, ratio=0.8)
-        self.conv3 = GraphConv(node_embed_dim, node_embed_dim)
-        self.pool3 = TopKPooling(node_embed_dim, ratio=0.8)
-
-        # self.lin = torch.nn.Linear(node_embed_dim * 2, graph_embed_dim)
-        self.lin1 = torch.nn.Linear(2 * node_embed_dim, 1024)
-        self.lin2 = torch.nn.Linear(1024, graph_embed_dim)
-
-        self.bn1 = torch.nn.BatchNorm1d(1024)
-        self.bn2 = torch.nn.BatchNorm1d(graph_embed_dim)
-
-        self.act1 = torch.nn.LeakyReLU()
-        self.act2 = torch.nn.LeakyReLU()
-
-        self.drop = torch.nn.Dropout(p=0.5)
-
+        self.conv1 = GraphConv(self.node_embed_dim, self.node_embed_dim)
+        self.pool1 = TopKPooling(self.node_embed_dim, ratio=0.8)
+        self.conv2 = GraphConv(self.node_embed_dim, self.node_embed_dim)
+        self.pool2 = TopKPooling(self.node_embed_dim, ratio=0.8)
+        self.conv3 = GraphConv(self.node_embed_dim, self.node_embed_dim)
+        self.pool3 = TopKPooling(self.node_embed_dim, ratio=0.8)
 
     def forward(self, data):
         x, edge_index, batch = data["x"], data["edge_index"].to(torch.long), data["batch"]
@@ -84,11 +72,5 @@ class SweetNetEncoder(LightningModule):
 
         # combining results from three graph convolutions
         x = x1 + x2 + x3
-
-        x = self.lin1(x)
-        x = self.bn1(self.act1(x))
-        x = self.lin2(x)
-        x = self.bn2(self.act2(x))
-        x = self.drop(x)
 
         return x, None

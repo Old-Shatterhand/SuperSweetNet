@@ -50,19 +50,26 @@ class MLP(LightningModule):
         **kwargs,
     ):
         super().__init__()
+        self.hidden_dims = hidden_dims
 
-        if len(hidden_dims) == 0:
+        if len(self.hidden_dims) == 0:
             self.mlp = nn.Linear(input_dim, output_dim)
         else:
-            self.mlp = nn.Sequential(nn.Linear(input_dim, hidden_dims[0]), nn.ReLU(), nn.Dropout(dropout))
-            for i in range(len(hidden_dims) - 1):
-                self.mlp.add_module("hidden_linear{}".format(i), nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
-                self.mlp.add_module("hidden_relu{}".format(i), nn.ReLU())
+            self.mlp = nn.Sequential(nn.Linear(input_dim, self.hidden_dims[0]), nn.ReLU(), nn.Dropout(dropout))
+            for i in range(len(self.hidden_dims) - 1):
+                self.mlp.add_module("hidden_linear{}".format(i), nn.Linear(self.hidden_dims[i], self.hidden_dims[i + 1]))
+                self.mlp.add_module("hidden_lrelu{}".format(i), nn.LeakyReLU())
+                self.mlp.add_module("batch_norm{}".format(i), nn.BatchNorm1d(self.hidden_dims[i + 1]))
                 self.mlp.add_module("hidden_dropout{}".format(i), nn.Dropout(dropout))
-            self.mlp.add_module("final_layer", nn.Linear(hidden_dims[-1], output_dim))
+            self.mlp.add_module("final_layer", nn.Linear(self.hidden_dims[-1], output_dim))
 
-    def forward(self, x: Tensor) -> Tensor:
-        return self.mlp(x)
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        if len(self.hidden_dims) != 0:
+            modules = list(self.mlp.children())
+            for module in modules[:-1]:
+                x = module(x)
+            return modules[-1](x), x
+        return self.mlp(x), x
 
 
 class BaseModel(LightningModule):
@@ -75,7 +82,8 @@ class BaseModel(LightningModule):
         self.acc = MCMLAccuracy()
         # self.mcc = MatthewsCorrCoef(num_classes=self.num_classes)
         self.confmat = ConfusionMatrix(num_classes=self.num_classes)  # , normalize='true')
-        self.embed = EmbeddingMetric(classes=classes)
+        self.gnn_embed = EmbeddingMetric(classes=classes)
+        self.mlp_embed = EmbeddingMetric(classes=classes)
         self.loss_fn = CrossEntropyLoss()
 
     def forward(self, drug: Data) -> dict:
@@ -85,10 +93,12 @@ class BaseModel(LightningModule):
         :return:
         """
         drug_embed, node_embeds = self.drug_encoder(drug)
+        pred, mlp_embed = self.mlp(drug_embed)
         return dict(
             drug_embed=drug_embed,
             node_embeds=node_embeds,
-            pred=self.mlp(drug_embed),
+            pred=pred,
+            mlp_embed=mlp_embed,
         )
 
     def training_step(self, data: Data) -> dict:
@@ -106,7 +116,8 @@ class BaseModel(LightningModule):
 
         if self.global_step % 100 == 0:
             self.confmat.update(fwd_dict["pred"].detach().argmax(dim=1), labels.detach().argmax(dim=1))
-            self.embed.update(fwd_dict["drug_embed"].detach(), labels.detach().argmax(dim=1))
+            self.gnn_embed.update(fwd_dict["drug_embed"].detach(), labels.detach().argmax(dim=1))
+            self.mlp_embed.update(fwd_dict["mlp_embed"].detach(), labels.detach().argmax(dim=1))
 
         self.log("loss", ce_loss, batch_size=self.batch_size)
 
@@ -129,9 +140,11 @@ class BaseModel(LightningModule):
         if self.global_step % 100 == 0:
             wandb.log(dict(
                 confusion_matrix=self.log_confmat(),
-                embeddings_tsne=self.embed.compute(),
+                gnn_embeddings_tsne=self.gnn_embed.compute(),
+                mlp_embeddings_tsne=self.mlp_embed.compute(),
             ))
-            self.embed.reset()
+            self.gnn_embed.reset()
+            self.mlp_embed.reset()
             plt.clf()
 
     def log_confmat(self):

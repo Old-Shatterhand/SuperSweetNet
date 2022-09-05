@@ -31,8 +31,8 @@ class SMILESTransformer:
 
     def __call__(self, data: Data) -> Data:
         x, edge_index = get_graph(data["smiles"])
-        data["x"] = torch.tensor(x)
-        data["edge_index"] = torch.tensor(edge_index).long()
+        data["x"] = x
+        data["edge_index"] = edge_index
         return data
 
 
