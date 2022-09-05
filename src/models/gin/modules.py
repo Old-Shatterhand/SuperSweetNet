@@ -1,4 +1,4 @@
-from typing import Union, Tuple
+from typing import Union, Tuple, Callable
 
 import torch
 from torch import nn, Tensor, LongTensor
@@ -28,9 +28,7 @@ class GraphEncoder(LightningModule):
     ):
         super().__init__()
         self.feat_embed = MLP(node_feat_dim, [64], graph_embed_dim)
-        self.node_embed = GINConvNet(graph_embed_dim, num_gnn_layers)
-        # self.pool = GMTNet(node_embed_dim, 2 * graph_embed_dim)
-        self.pool = global_mean_pool
+        self.node_embed = GINConvNet(graph_embed_dim, global_mean_pool, num_gnn_layers)
 
     def forward(self, data: Union[dict, Data], **kwargs,) -> Tuple[Tensor, Tensor]:
         r"""Encode a graph.
@@ -52,15 +50,14 @@ class GraphEncoder(LightningModule):
             data.get("edge_feats"),
         )
         feat_embed, _ = self.feat_embed(x)
-        node_embed = self.node_embed(
+        graph_embed, node_embed = self.node_embed(
             x=feat_embed,
             edge_index=edge_index,
             edge_feats=edge_feats,
             batch=batch,
         )
-        embed = self.pool(x=node_embed, batch=batch)
 
-        return embed, node_embed
+        return graph_embed, node_embed
 
 
 class GINConvNet(LightningModule):
@@ -73,9 +70,9 @@ class GINConvNet(LightningModule):
         num_layers (int, optional): Total number of layers. Defaults to 3.
     """
 
-    def __init__(self, hidden_dim: int, num_layers: int = 3):
+    def __init__(self, hidden_dim: int, pooling: Callable, num_layers: int = 3):
         super().__init__()
-        self.mid_layers = nn.ModuleList([
+        self.layers = nn.ModuleList([
             GINConv(
                 nn.Sequential(
                     nn.Linear(hidden_dim, hidden_dim),
@@ -87,11 +84,15 @@ class GINConvNet(LightningModule):
             for _ in range(num_layers)
         ])
 
-    def forward(self, x: Tensor, edge_index: Adj, **kwargs) -> Tensor:
+        self.pooling = pooling
+
+    def forward(self, x: Tensor, edge_index: Adj, batch, **kwargs) -> Tuple[Tensor, Tensor]:
         """"""
-        for module in self.mid_layers:
+        pools = []
+        for module in self.layers:
             x = module(x, edge_index)
-        return x
+            pools.append(self.pooling(x=x, batch=batch))
+        return torch.stack(pools).sum(dim=0), x
 
 
 class GMTNet(LightningModule):

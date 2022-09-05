@@ -16,7 +16,7 @@ early_stop:
   monitor: loss
   mode: min
 model:
-  postfix: blub
+  postfix: boom
   arch: gin
   hidden_dims: [1024, 512]
   graph_embed_dim: 256
