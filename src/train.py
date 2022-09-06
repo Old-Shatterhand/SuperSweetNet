@@ -2,6 +2,7 @@ import os
 import random
 
 import git
+import wandb
 import yaml
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, RichModelSummary, RichProgressBar
@@ -14,8 +15,10 @@ from src.data.data import GlycanDataModule
 from src.models.class_model import ClassModel
 from src.models.gin.transform import SMILESTransformer
 from src.models.sweetnet.transform import SweetNetTransformer
+from src.utils import IterDict
 
 torch.multiprocessing.set_sharing_strategy('file_system')
+os.environ["WANDB_CACHE_DIR"] = "/scratch/SCRATCH_SAS/roman/.config/wandb"
 
 
 init_filters = {
@@ -74,13 +77,17 @@ def single_run(**kwargs):
     logger = WandbLogger(
         log_model='all',
         project="pretrain_glycans",
-        name=arch + "_" + kwargs["model"]["postfix"]
+        name=f"{arch}_{kwargs['model']['postfix']}_{kwargs['datamodule']['task']}"
     )
     logger.experiment.config.update(kwargs)
 
     callbacks = [
         ModelCheckpoint(monitor="loss", save_top_k=3, save_last=True, mode="min"),
-        EarlyStopping(monitor=kwargs["early_stop"]["monitor"], mode=kwargs["early_stop"]["mode"], patience=kwargs["early_stop"]["patience"]),
+        EarlyStopping(
+            monitor=kwargs["early_stop"]["monitor"],
+            mode=kwargs["early_stop"]["mode"],
+            patience=kwargs["early_stop"]["patience"]
+        ),
         RichModelSummary(),
         RichProgressBar(),
     ]
@@ -88,6 +95,7 @@ def single_run(**kwargs):
         callbacks=callbacks,
         logger=logger,
         log_every_n_steps=25,
+        limit_train_batches=10,
         enable_model_summary=False,
         **kwargs["trainer"],
     )
@@ -105,6 +113,7 @@ def single_run(**kwargs):
     print("Model buildup finished")
     trainer.fit(model, datamodule)
     # trainer.test(model, datamodule)
+    wandb.finish()
 
 
 if __name__ == "__main__":
@@ -116,4 +125,14 @@ if __name__ == "__main__":
 
     orig_config = read_config(args.config)
     orig_config["git_hash"] = get_git_hash()  # to know the version of the code
-    train(**orig_config)
+    for task in [
+        "domain",
+        "kingdom",
+        "phylum",
+        "class",
+        "order",
+        "genus",
+        "species"
+    ]:
+        orig_config["datamodule"]["task"] = task
+        train(**orig_config)

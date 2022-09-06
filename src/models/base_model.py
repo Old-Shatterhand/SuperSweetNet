@@ -156,7 +156,7 @@ class BaseModel(LightningModule):
         return px.imshow(
             confmat_df,
             zmin=0,
-            zmax=1,
+            zmax=confmat_df.max().max(),
             text_auto=True,
             width=400,
             height=400,

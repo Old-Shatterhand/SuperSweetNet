@@ -1,14 +1,14 @@
 runs: 1
 seed: 42
 datamodule:
-  task: domain
+  task: [domain, kingdom, phylum, class, order, genus, species]
   exp_name: ssn
   batch_size: 128
   num_workers: 16
   num_classes: 4
 trainer:
   gpus: 1
-  max_epochs: 1000
+  max_epochs: 100
   profiler: null
   gradient_clip_val: 100
 early_stop:
@@ -16,7 +16,7 @@ early_stop:
   monitor: loss
   mode: min
 model:
-  postfix: boom
+  postfix: test
   arch: gin
   hidden_dims: [1024, 512]
   graph_embed_dim: 256
