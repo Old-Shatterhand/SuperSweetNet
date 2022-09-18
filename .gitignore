@@ -2,3 +2,8 @@ data/
 tb_logs
 .idea/
 .git/
+__pycache__/
+pretrain_glycans/
+lightning_logs/
+wandb/
+

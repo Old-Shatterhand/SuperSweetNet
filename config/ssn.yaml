@@ -16,8 +16,8 @@ early_stop:
   monitor: loss
   mode: min
 model:
-  postfix: test
-  arch: gin
+  postfix: full
+  arch: sweetnet
   hidden_dims: [1024, 512]
   graph_embed_dim: 256
   gin:

@@ -128,11 +128,11 @@ if __name__ == "__main__":
     for task in [
         "domain",
         "kingdom",
-        "phylum",
-        "class",
-        "order",
-        "genus",
-        "species"
+        # "phylum",
+        # "class",
+        # "order",
+        # "genus",
+        # "species"
     ]:
         orig_config["datamodule"]["task"] = task
         train(**orig_config)
