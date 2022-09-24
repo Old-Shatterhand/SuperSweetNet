@@ -10,8 +10,10 @@ from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 import torch
 from rdkit import Chem
 from torch_geometric.data import Data
+from torch_geometric.transforms import Compose
 
 from src.data.data import GlycanDataModule
+from src.models.cin.transform import CINTransformer
 from src.models.class_model import ClassModel
 from src.models.gin.transform import SMILESTransformer
 from src.models.sweetnet.transform import SweetNetTransformer
@@ -22,16 +24,16 @@ os.environ["WANDB_CACHE_DIR"] = "/scratch/SCRATCH_SAS/roman/.config/wandb"
 
 
 init_filters = {
-    "cin": None,
+    "cin": lambda x: len(x["smiles"]) > 10 and Chem.MolFromSmiles(x["smiles"]) is not None,
     "gin": lambda x: len(x["smiles"]) > 10 and Chem.MolFromSmiles(x["smiles"]) is not None,
     "sweetnet": None,
 }
 
 
 init_transforms = {
-    "cin": lambda x: x,
-    "gin": SMILESTransformer,
-    "sweetnet": SweetNetTransformer,
+    "cin": Compose([SMILESTransformer(), CINTransformer()]),
+    "gin": SMILESTransformer(),
+    "sweetnet": SweetNetTransformer(),
 }
 
 
@@ -62,9 +64,10 @@ def single_run(**kwargs):
     arch = kwargs["model"]["arch"]
     seed_everything(kwargs["seed"])
     datamodule = GlycanDataModule(
-        filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}.tsv",
+        # filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}_2.tsv",
+        filename=f"data/pred_{kwargs['datamodule']['task']}_2.tsv",
         init_filter=init_filters[arch],
-        init_transform=init_transforms[arch](**kwargs["model"][arch]),
+        init_transform=init_transforms[arch],  #  (**kwargs["model"][arch]),
         **kwargs["datamodule"],
     )
 
@@ -74,12 +77,12 @@ def single_run(**kwargs):
         version=kwargs["seed"],
         default_hp_metric=False,
     )"""
-    logger = WandbLogger(
-        log_model='all',
-        project="pretrain_glycans",
-        name=f"{arch}_{kwargs['model']['postfix']}_{kwargs['datamodule']['task']}"
-    )
-    logger.experiment.config.update(kwargs)
+    # logger = WandbLogger(
+    #     log_model='all',
+    #     project="pretrain_glycans",
+    #     name=f"{arch}_{kwargs['model']['postfix']}_{kwargs['datamodule']['task']}"
+    # )
+    # logger.experiment.config.update(kwargs)
 
     callbacks = [
         ModelCheckpoint(monitor="loss", save_top_k=3, save_last=True, mode="min"),
@@ -88,13 +91,13 @@ def single_run(**kwargs):
             mode=kwargs["early_stop"]["mode"],
             patience=kwargs["early_stop"]["patience"]
         ),
-        RichModelSummary(),
-        RichProgressBar(),
+        # RichModelSummary(),
+        # RichProgressBar(),
     ]
     trainer = Trainer(
         callbacks=callbacks,
-        logger=logger,
-        log_every_n_steps=25,
+        # logger=logger,
+        log_every_n_steps=2,
         limit_train_batches=10,
         enable_model_summary=False,
         **kwargs["trainer"],
@@ -113,7 +116,7 @@ def single_run(**kwargs):
     print("Model buildup finished")
     trainer.fit(model, datamodule)
     # trainer.test(model, datamodule)
-    wandb.finish()
+    # wandb.finish()
 
 
 if __name__ == "__main__":
@@ -127,7 +130,7 @@ if __name__ == "__main__":
     orig_config["git_hash"] = get_git_hash()  # to know the version of the code
     for task in [
         "domain",
-        "kingdom",
+        # "kingdom",
         # "phylum",
         # "class",
         # "order",

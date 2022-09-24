@@ -95,7 +95,7 @@ def clean(level):
 
 
 def main(filepath, datapath, split_mode="random", class_level="Species", smiles_help=None):
-    datapath = datapath.replace("?", class_level.lower())
+    datapath = datapath.replace("?", class_level.lower() + "_2")
     """class_level from 'Species', 'Genus', 'Order', 'Class', 'Phylum', 'Kingdom', 'Domain'"""
 
     if smiles_help is not None:
@@ -113,9 +113,10 @@ def main(filepath, datapath, split_mode="random", class_level="Species", smiles_
     data["split"] = split(data, split_mode)
     labels = get_dummies(data[class_level])
     data = pd.concat([data.reset_index(drop=True), labels.reset_index(drop=True)], axis=1)
-    data.to_csv(datapath, index=False, sep="\t")
+    data.dropna(subset=["SMILES"], axis='rows', inplace=True)
+    data[:50].to_csv(datapath, index=False, sep="\t")
     print(data.shape)
 
 
 if __name__ == '__main__':
-    main("./data/glycowork_v05.tsv", "./data/pred_?.tsv", "random", "Domain", "./data/pred_species.tsv")
+    main("./data/glycowork_v05.tsv", "./data/pred_?.tsv", "random", "Domain", "./data/pred_domain.tsv")

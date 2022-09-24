@@ -3,7 +3,6 @@ from typing import Union, Tuple, Callable
 import torch
 from torch import nn, Tensor, LongTensor
 import torch.nn.functional as F
-from torch.nn import ModuleList
 from torch_geometric.data import Data
 from torch_geometric.nn import GINConv, GraphMultisetTransformer, global_mean_pool
 from pytorch_lightning import LightningModule
@@ -20,11 +19,12 @@ class GraphEncoder(LightningModule):
     """
 
     def __init__(
-        self,
-        graph_embed_dim: int,
-        node_feat_dim: int,
-        node_embed_dim: int,
-        num_gnn_layers: int,
+            self,
+            graph_embed_dim: int,
+            node_feat_dim: int,
+            node_embed_dim: int,
+            num_gnn_layers: int,
+            **kwargs,
     ):
         super().__init__()
         self.feat_embed = MLP(node_feat_dim, [64], graph_embed_dim)

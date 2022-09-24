@@ -1,18 +1,19 @@
-import copy
 import os
 from typing import Union, List, Tuple, Callable
 
-from rdkit import Chem
 import torch
 from pytorch_lightning import LightningDataModule
+from torch.utils.data import DataLoader
 from torch_geometric.data import InMemoryDataset, Data
+from torch_geometric.data.collate import collate
 from torch_geometric.data.separate import separate
-from torch_geometric.loader import DataLoader
+
+from src.models.cin.code.data.complex import CochainBatch, ComplexBatch, Complex
+from src.models.cin.code.data.data_loading import Collater
 
 
 class GlycanDataModule(LightningDataModule):
     """Base data module, contains all the datasets for train, val and test."""
-
     def __init__(
             self,
             filename: str,
@@ -43,14 +44,23 @@ class GlycanDataModule(LightningDataModule):
         raise NotImplementedError
 
     def train_dataloader(self):
-        return DataLoader(self.train, **self._dl_kwargs(True))
+        return DataLoader(self.train, collate_fn=GlycanDataset.collate_fn, **self._dl_kwargs(True))
+
+    def test_dataloader(self):
+        raise NotImplementedError()
+
+    def val_dataloader(self):
+        raise NotImplementedError()
+
+    def predict_dataloader(self):
+        raise NotImplementedError()
 
     def _dl_kwargs(self, shuffle: bool = False):
         return dict(
             batch_size=self.batch_size,
             shuffle=self.shuffle if shuffle else False,
             num_workers=self.num_workers,
-            follow_batch=["x"],
+            # follow_batch=["x"],
         )
 
 
@@ -74,6 +84,44 @@ class GlycanDataset(InMemoryDataset):
         else:
             self.data, self.slices, self.classes = torch.load(self.processed_paths[0])
 
+    @staticmethod
+    def collate(data_list: List):
+        r"""Collates a Python list of :obj:`torch_geometric.data.Data` objects
+        to the internal storage format of
+        :class:`~torch_geometric.data.InMemoryDataset`."""
+        if len(data_list) == 1:
+            return data_list[0], None
+
+        if isinstance(data_list[0], Complex):
+            return ComplexBatch.from_complex_list(data_list), None
+
+        data, slices, _ = collate(
+            data_list[0].__class__,
+            data_list=data_list,
+            increment=False,
+            add_batch=False,
+        )
+
+        return data, slices
+
+    @staticmethod
+    def collate_fn(data_list: List):
+        r"""Collates a Python list of :obj:`torch_geometric.data.Data` objects
+                to the internal storage format of
+                :class:`~torch_geometric.data.InMemoryDataset`."""
+        if len(data_list) == 1:
+            return data_list[0]
+
+        if isinstance(data_list[0], Complex):
+            return ComplexBatch.from_complex_list(data_list)
+
+        return collate(
+            data_list[0].__class__,
+            data_list=data_list,
+            increment=False,
+            add_batch=False,
+        )[0]
+
     def unsaved_preps(self, init_filter, init_transform):
         tmp_data, tmp_slices, self.classes = torch.load(self.processed_paths[0])
 
@@ -94,6 +142,8 @@ class GlycanDataset(InMemoryDataset):
             datalist = [init_transform(d) for d in [get(i) for i in range(tmp_data["y"].size(0))]]
         if init_filter is not None or init_transform is not None:
             # print(all([Chem.MolFromSmiles(d["smiles"]) is not None for d in datalist]))
+            # self.data, self.slices = ComplexBatch.from_complex_list(datalist)  # self.collate(datalist)
+            # ComplexBatch.from_complex_list(datalist)
             self.data, self.slices = self.collate(datalist)
             # print(all([Chem.MolFromSmiles(d) is not None for d in self.data["smiles"]]))
 

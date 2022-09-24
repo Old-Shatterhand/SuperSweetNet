@@ -1,9 +1,10 @@
 from src.models.base_model import BaseModel, MLP
+from src.models.cin.modules import SimplexEncoder
 from src.models.gin.modules import GraphEncoder
 from src.models.sweetnet.modules import SweetNetEncoder
 
 encoders = {
-    "cin": None,
+    "cin": SimplexEncoder,
     "gin": GraphEncoder,
     "sweetnet": SweetNetEncoder,
 }
