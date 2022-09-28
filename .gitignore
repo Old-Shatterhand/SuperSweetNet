@@ -1,4 +1,5 @@
 /data/
+src/models/sweetnet/data/
 tb_logs
 .idea/
 .git/

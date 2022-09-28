@@ -511,11 +511,13 @@ class Complex(object):
         self.edges = cochains[1] if dimension >= 1 else None
         self.two_cells = cochains[2] if dimension >= 2 else None
 
+        self.num_nodes = sum(0 if x is None else x.num_cells for x in [self.nodes, self.edges, self.two_cells])
+
         self.y = y
         
         self._consolidate()
         return
-    
+
     def _consolidate(self):
         for dim in range(self.dimension+1):
             cochain = self.cochains[dim]

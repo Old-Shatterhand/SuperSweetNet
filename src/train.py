@@ -64,19 +64,12 @@ def single_run(**kwargs):
     arch = kwargs["model"]["arch"]
     seed_everything(kwargs["seed"])
     datamodule = GlycanDataModule(
-        # filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}_2.tsv",
-        filename=f"data/pred_{kwargs['datamodule']['task']}_2.tsv",
+        filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}.tsv",
+        # filename=f"data/pred_{kwargs['datamodule']['task']}_2.tsv",
         init_filter=init_filters[arch],
         init_transform=init_transforms[arch],  #  (**kwargs["model"][arch]),
         **kwargs["datamodule"],
     )
-
-    """logger = TensorBoardLogger(
-        save_dir=folder,
-        name=f"version_{version}",
-        version=kwargs["seed"],
-        default_hp_metric=False,
-    )"""
     # logger = WandbLogger(
     #     log_model='all',
     #     project="pretrain_glycans",
@@ -91,14 +84,14 @@ def single_run(**kwargs):
             mode=kwargs["early_stop"]["mode"],
             patience=kwargs["early_stop"]["patience"]
         ),
-        # RichModelSummary(),
-        # RichProgressBar(),
+        RichModelSummary(),
+        RichProgressBar(),
     ]
     trainer = Trainer(
         callbacks=callbacks,
         # logger=logger,
-        log_every_n_steps=2,
-        limit_train_batches=10,
+        log_every_n_steps=25,
+        # limit_train_batches=10,
         enable_model_summary=False,
         **kwargs["trainer"],
     )

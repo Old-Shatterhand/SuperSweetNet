@@ -3,13 +3,13 @@ from typing import Union, List, Tuple, Callable
 
 import torch
 from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.data.collate import collate
 from torch_geometric.data.separate import separate
+from torch_geometric.loader import DynamicBatchSampler
 
-from src.models.cin.code.data.complex import CochainBatch, ComplexBatch, Complex
-from src.models.cin.code.data.data_loading import Collater
+from src.data.loader import SSNDataLoader
+from src.models.cin.code.data.complex import ComplexBatch, Complex
 
 
 class GlycanDataModule(LightningDataModule):
@@ -44,7 +44,20 @@ class GlycanDataModule(LightningDataModule):
         raise NotImplementedError
 
     def train_dataloader(self):
-        return DataLoader(self.train, collate_fn=GlycanDataset.collate_fn, **self._dl_kwargs(True))
+        if True:
+            return SSNDataLoader(
+                self.train,
+                batch_sampler=DynamicBatchSampler(self.train, max_num=10, mode="node"),
+                num_workers=self.num_workers,
+                follow_batch=["x"],
+            )
+        return SSNDataLoader(
+            self.train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            follow_batch=["x"],
+        )
 
     def test_dataloader(self):
         raise NotImplementedError()
@@ -54,14 +67,6 @@ class GlycanDataModule(LightningDataModule):
 
     def predict_dataloader(self):
         raise NotImplementedError()
-
-    def _dl_kwargs(self, shuffle: bool = False):
-        return dict(
-            batch_size=self.batch_size,
-            shuffle=self.shuffle if shuffle else False,
-            num_workers=self.num_workers,
-            # follow_batch=["x"],
-        )
 
 
 class GlycanDataset(InMemoryDataset):
