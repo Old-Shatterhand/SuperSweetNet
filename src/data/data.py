@@ -77,7 +77,7 @@ class GlycanDataset(InMemoryDataset):
             pre_transform: Callable = None,
             init_filter: Callable = None,
             init_transform: Callable = None,
-            transform=None,
+            transform: Callable = None,
     ):
         self.loaded = False
         root = self._set_filenames(filename, exp_name)

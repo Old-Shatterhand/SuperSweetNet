@@ -11,12 +11,16 @@ import torch
 from rdkit import Chem
 from torch_geometric.data import Data
 from torch_geometric.transforms import Compose
+from torchvision.transforms import ToTensor
 
 from src.data.data import GlycanDataModule
+from src.data.pretrain import PretrainDataModule
 from src.models.cin.transform import CINTransformer
 from src.models.class_model import ClassModel
 from src.models.gin.transform import SMILESTransformer
+from src.models.pretrain.transform import MaskType, PosNoise
 from src.models.sweetnet.transform import SweetNetTransformer
+from src.pretrain_model import PretrainModel
 from src.utils import IterDict
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -63,19 +67,28 @@ def single_run(**kwargs):
     """Does a single run."""
     arch = kwargs["model"]["arch"]
     seed_everything(kwargs["seed"])
-    datamodule = GlycanDataModule(
-        filename=f"/home/rjo21/Desktop/SuperSweetNet/data/pred_{kwargs['datamodule']['task']}.tsv",
-        # filename=f"data/pred_{kwargs['datamodule']['task']}_2.tsv",
-        init_filter=init_filters[arch],
-        init_transform=init_transforms[arch],  #  (**kwargs["model"][arch]),
-        **kwargs["datamodule"],
+    if kwargs["datamodule"]["task"] != "pretrain":
+        datamodule = GlycanDataModule(
+            filename=f"data/pred_{kwargs['datamodule']['task']}_2.tsv",
+            init_filter=init_filters[arch],
+            init_transform=init_transforms[arch],  #  (**kwargs["model"][arch]),
+            **kwargs["datamodule"],
+        )
+    else:
+        datamodule = PretrainDataModule(
+            filename=f"data/pdb/",
+            transform=Compose([
+                PosNoise(),
+                MaskType(),
+            ]),
+            **kwargs["datamodule"],
+        )
+    logger = WandbLogger(
+        log_model='all',
+        project="pretrain_glycans",
+        name=f"{arch}_{kwargs['model']['postfix']}_{kwargs['datamodule']['task']}"
     )
-    # logger = WandbLogger(
-    #     log_model='all',
-    #     project="pretrain_glycans",
-    #     name=f"{arch}_{kwargs['model']['postfix']}_{kwargs['datamodule']['task']}"
-    # )
-    # logger.experiment.config.update(kwargs)
+    logger.experiment.config.update(kwargs)
 
     callbacks = [
         ModelCheckpoint(monitor="loss", save_top_k=3, save_last=True, mode="min"),
@@ -89,27 +102,39 @@ def single_run(**kwargs):
     ]
     trainer = Trainer(
         callbacks=callbacks,
-        # logger=logger,
+        logger=logger,
         log_every_n_steps=25,
         # limit_train_batches=10,
         enable_model_summary=False,
         **kwargs["trainer"],
     )
-    print(datamodule.train.classes)
-    model = ClassModel(
-        kwargs["model"]["graph_embed_dim"],
-        arch,
-        kwargs["model"][arch],
-        kwargs["model"]["hidden_dims"],
-        datamodule.train.classes,
-        kwargs["datamodule"]["batch_size"],
-        kwargs["optimizer"],
-    )
+
+    if kwargs["datamodule"]["task"] != "pretrain":
+        print(datamodule.train.classes)
+        model = ClassModel(
+            kwargs["model"]["graph_embed_dim"],
+            arch,
+            kwargs["model"][arch],
+            kwargs["model"]["hidden_dims"],
+            datamodule.train.classes,
+            kwargs["datamodule"]["batch_size"],
+            kwargs["optimizer"],
+        )
+    else:
+        model = PretrainModel(
+            kwargs["model"]["graph_embed_dim"],
+            arch,
+            kwargs["model"][arch],
+            kwargs["model"]["hidden_dims"],
+            ["C", "N", "O", "S", "R", "M"],
+            kwargs["datamodule"]["batch_size"],
+            kwargs["optimizer"],
+        )
 
     print("Model buildup finished")
     trainer.fit(model, datamodule)
     # trainer.test(model, datamodule)
-    # wandb.finish()
+    wandb.finish()
 
 
 if __name__ == "__main__":
@@ -121,14 +146,17 @@ if __name__ == "__main__":
 
     orig_config = read_config(args.config)
     orig_config["git_hash"] = get_git_hash()  # to know the version of the code
-    for task in [
-        "domain",
-        # "kingdom",
-        # "phylum",
-        # "class",
-        # "order",
-        # "genus",
-        # "species"
-    ]:
-        orig_config["datamodule"]["task"] = task
+    if orig_config["datamodule"]["task"] != "pretrain":
+        for task in [
+            "domain",
+            # "kingdom",
+            # "phylum",
+            # "class",
+            # "order",
+            # "genus",
+            # "species"
+        ]:
+            orig_config["datamodule"]["task"] = task
+            train(**orig_config)
+    else:
         train(**orig_config)

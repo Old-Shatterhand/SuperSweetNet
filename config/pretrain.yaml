@@ -1,0 +1,47 @@
+runs: 1
+seed: 42
+datamodule:
+  task: pretrain
+  exp_name: pretrain
+  batch_size: 64
+  num_workers: 16
+  num_classes: 4
+trainer:
+  gpus: 1
+  max_epochs: 100
+  profiler: null
+  gradient_clip_val: 100
+early_stop:
+  patience: 100
+  monitor: loss
+  mode: min
+model:
+  postfix: pretrain
+  arch: pos
+  hidden_dims: [1024, 512]
+  graph_embed_dim: 256
+  gin:
+    node_feat_dim: 6
+    node_embed_dim: 512
+    num_gnn_layers: 3
+  sweetnet: {}
+  cin:
+    node_feat_dim: 6
+    node_embed_dim: 256
+    num_gnn_layers: 2
+  pos:
+    node_feat_dim: 3
+    node_embed_dim: 256
+    num_gnn_layers: 3
+optimizer:
+  module: adam
+  lr: 0.0001
+  weight_decay: 0.001
+  momentum: 0.01
+  lr_schedule:
+    module: lwca
+    lr: 50
+    min_lr: 0.0000001
+    start_lr: 0.00001
+    warmup_epochs: 10
+    cos_restart_dist: 60
